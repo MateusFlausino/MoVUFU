@@ -100,7 +100,6 @@ select:focus-visible,
 .nodes-panel,
 .pick-panel,
 .admin-panel,
-.upload-panel,
 .voice-panel {
   display: grid;
   gap: 12px;
@@ -165,7 +164,6 @@ input[type="text"] {
 
 .button-row button,
 .segmented button,
-.upload-form button,
 .panel-title button,
 .text-button,
 .map-toolbar button {
@@ -192,12 +190,6 @@ input[type="text"] {
   color: #fff;
 }
 
-.upload-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px;
-  gap: 10px;
-}
-
 .voice-command-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 96px;
@@ -211,44 +203,6 @@ input[type="text"] {
   background: #e7ebf0;
   color: var(--text);
   font-weight: 750;
-}
-
-.file-field {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  min-height: 42px;
-  padding: 0 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: #fff;
-  cursor: pointer;
-}
-
-.file-field span {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text);
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-field input {
-  position: absolute;
-  inline-size: 1px;
-  block-size: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.upload-form button {
-  background: #e7ebf0;
-}
-
-.upload-form button:disabled {
-  cursor: wait;
-  opacity: 0.62;
 }
 
 .button-row .primary {
@@ -723,36 +677,64 @@ input[type="text"] {
   }
 
   .app-shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(58vh, 1fr);
+    display: flex;
+    flex-direction: column;
     height: auto;
-    min-height: 100vh;
+    min-height: 100svh;
   }
 
   .control-panel {
-    gap: 12px;
+    order: 2;
+    gap: 10px;
+    padding: 16px;
     border-right: 0;
-    border-bottom: 1px solid var(--line);
-    box-shadow: 0 8px 24px rgba(18, 32, 46, 0.1);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -10px 30px rgba(18, 32, 46, 0.1);
   }
 
   .map-panel {
-    min-height: 58vh;
+    order: 1;
+    min-height: 52svh;
   }
 
   .nodes-panel {
-    max-height: 190px;
+    max-height: 180px;
     overflow-y: auto;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .brand h1 {
+    margin: 0;
+    text-align: right;
+  }
+
+  .result-panel {
+    order: 4;
+  }
+
+  .nodes-panel,
+  .admin-panel {
+    order: 5;
+  }
+
+  .status {
+    margin-top: 0;
   }
 }
 
 @media (max-width: 560px) {
   .control-panel {
-    padding: 14px;
+    padding: 12px;
   }
 
   .brand h1 {
-    font-size: 1.4rem;
+    font-size: 1.22rem;
   }
 
   .route-form,
@@ -760,17 +742,36 @@ input[type="text"] {
   .nodes-panel,
   .pick-panel,
   .admin-panel,
-  .upload-panel,
   .voice-panel {
-    padding: 12px;
+    gap: 10px;
+    padding: 10px;
   }
 
   .button-row,
-  .upload-form,
   .voice-command-form,
-  .metric-grid,
   .pick-panel {
     grid-template-columns: 1fr;
+  }
+
+  .route-form {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .metric-grid div {
+    padding: 9px 8px;
+  }
+
+  .metric-grid span {
+    font-size: 0.68rem;
+  }
+
+  .metric-grid strong {
+    font-size: 1rem;
   }
 
   .segmented {
@@ -778,8 +779,12 @@ input[type="text"] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .map-panel {
+    min-height: 50svh;
+  }
+
   .map-toolbar {
-    top: 64px;
+    top: 60px;
     right: 12px;
     grid-template-columns: 38px 38px 58px;
   }

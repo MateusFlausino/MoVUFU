@@ -1,5 +1,4 @@
 const DATA_URL = "data/dwg-map-raw.json";
-const DWG_UPLOAD_URL = "/api/upload-dwg";
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DUPLICATE_POINT_EPSILON = 0.000001;
 const MILLIMETERS_PER_METER = 1000;
@@ -84,10 +83,6 @@ async function loadCurrentMapData(statusText = "Carregando planta...") {
 }
 
 function cacheDom() {
-  refs.uploadForm = document.getElementById("uploadForm");
-  refs.dwgFile = document.getElementById("dwgFile");
-  refs.dwgFileName = document.getElementById("dwgFileName");
-  refs.uploadBtn = document.getElementById("uploadBtn");
   refs.routeForm = document.getElementById("routeForm");
   refs.originSelect = document.getElementById("originSelect");
   refs.destinationSelect = document.getElementById("destinationSelect");
@@ -129,8 +124,6 @@ function cacheDom() {
 }
 
 function bindEvents() {
-  refs.uploadForm.addEventListener("submit", handleDwgUpload);
-  refs.dwgFile.addEventListener("change", syncSelectedDwgName);
   refs.routeForm.addEventListener("submit", (event) => {
     event.preventDefault();
     calculateAndRenderRoute();
@@ -386,21 +379,14 @@ function buildVoiceNodeAliases(node) {
   const aliases = [
     id,
     node?.name,
-    node?.attributes?.DESCRICAO,
-    node?.attributes?.["DESCRIÇÃO"],
-    node?.attributes?.DESCRIPTION,
-    node?.attributes?.BLOCO,
-    node?.attributes?.BLOCK,
-    node?.attributes?.BUILDING,
-    node?.attributes?.PREDIO,
-    node?.attributes?.["PRÉDIO"]
+    getNodeAttribute(node, "descricao", "descrição", "description", "label"),
+    getNodeAttribute(node, "bloco", "block", "building", "predio", "prédio")
   ].filter(Boolean);
 
   [
     node?.name,
-    node?.attributes?.DESCRICAO,
-    node?.attributes?.["DESCRIÇÃO"],
-    node?.attributes?.DESCRIPTION
+    getNodeAttribute(node, "descricao", "descrição", "description", "label"),
+    getNodeAttribute(node, "bloco", "block", "building", "predio", "prédio")
   ].filter(Boolean).forEach((value) => {
     extractBlockAliases(value).forEach((alias) => aliases.push(alias));
   });
@@ -748,56 +734,6 @@ function setViewMode(mode) {
   }
 }
 
-async function handleDwgUpload(event) {
-  event.preventDefault();
-
-  const file = refs.dwgFile.files?.[0];
-  if (!file) {
-    setStatus("Escolha um arquivo DWG para atualizar a planta.", "warning");
-    return;
-  }
-
-  if (!file.name.toLowerCase().endsWith(".dwg")) {
-    setStatus("Envie um arquivo com extensao .dwg.", "warning");
-    return;
-  }
-
-  const formData = new FormData();
-  formData.append("dwgFile", file);
-
-  refs.uploadBtn.disabled = true;
-  refs.dwgFile.disabled = true;
-  setStatus("Enviando DWG e convertendo a planta. Isso pode levar alguns segundos...");
-
-  try {
-    const response = await fetch(DWG_UPLOAD_URL, {
-      method: "POST",
-      body: formData
-    });
-    const payload = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      throw new Error(payload?.error || "Nao foi possivel atualizar a planta.");
-    }
-
-    refs.dwgFile.value = "";
-    syncSelectedDwgName();
-    await loadCurrentMapData();
-    setStatus(`Planta atualizada. ${buildLoadedStatus(state.rawData || payload)}`, "success");
-  } catch (error) {
-    console.error(error);
-    setStatus(error.message || "Nao foi possivel atualizar a planta.", "error");
-  } finally {
-    refs.uploadBtn.disabled = false;
-    refs.dwgFile.disabled = false;
-  }
-}
-
-function syncSelectedDwgName() {
-  const file = refs.dwgFile.files?.[0];
-  refs.dwgFileName.textContent = file ? file.name : "Selecionar DWG";
-}
-
 function getBuildingHeightStorageKey(rawData = state.rawData) {
   const source = String(rawData?.source || rawData?.summary?.source || DATA_URL);
   return `${BUILDING_HEIGHT_STORAGE_PREFIX}${source}`;
@@ -886,14 +822,47 @@ function normalizeNodes(rawNodes) {
       category: normalizeNodeCategory(item.category, item.type),
       flow: String(item.flow || "").trim(),
       layer: String(item.layer || "").trim(),
-      level: String(item.level || "").trim(),
-      name: String(item.name || "").trim(),
+      level: String(item.level || getNodeAttribute(item, "nivel", "level", "floor", "pavimento") || "").trim(),
+      name: String(item.name || getNodeAttribute(item, "descricao", "descrição", "description", "label", "bloco", "predio", "building") || "").trim(),
       type: String(item.type || "").trim(),
       position
     });
   });
 
   return [...nodesById.values()].sort((left, right) => naturalCompare(left.id, right.id));
+}
+
+function getNodeAttribute(item, ...names) {
+  const attributes = item?.attributes;
+
+  if (!attributes || typeof attributes !== "object") {
+    return "";
+  }
+
+  const normalizedNames = names.map(normalizeAttributeKey);
+  const entries = Object.entries(attributes);
+
+  for (const [key, value] of entries) {
+    const normalizedKey = normalizeAttributeKey(key);
+
+    if (normalizedNames.includes(normalizedKey)) {
+      return value;
+    }
+  }
+
+  for (const [key, value] of entries) {
+    const normalizedKey = normalizeAttributeKey(key);
+
+    if (normalizedNames.some((name) => normalizedKey.startsWith(name.slice(0, 6)))) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+function normalizeAttributeKey(value) {
+  return normalizeVoiceText(value).replace(/[^a-z0-9]/g, "");
 }
 
 function normalizePathItems(rawItems) {
@@ -2286,13 +2255,8 @@ function getNodeLabel(node) {
 
 function getNodeDisplayName(node) {
   return node.name
-    || node.attributes?.DESCRICAO
-    || node.attributes?.["DESCRIÇÃO"]
-    || node.attributes?.DESCRIPTION
-    || node.attributes?.BLOCO
-    || node.attributes?.BUILDING
-    || node.attributes?.PREDIO
-    || node.attributes?.["PRÉDIO"]
+    || getNodeAttribute(node, "descricao", "descrição", "description", "label")
+    || getNodeAttribute(node, "bloco", "block", "building", "predio", "prédio")
     || node.type
     || node.blockName
     || "Sem descricao";
