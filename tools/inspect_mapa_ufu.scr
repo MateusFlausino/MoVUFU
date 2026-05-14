@@ -1,0 +1,4 @@
+(setvar "SECURELOAD" 0)
+(load "C:/Users/flaus/Downloads/Problema do Carteiro Viajante - Acessibilidade UFU/tools/inspect_dwg.lsp")
+(inspect-dwg "C:/Users/flaus/Downloads/Problema do Carteiro Viajante - Acessibilidade UFU/data/mapa-ufu-inspect.json")
+_.QUIT

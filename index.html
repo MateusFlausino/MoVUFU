@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roteador da Planta UFU</title>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app-shell">
+    <section class="control-panel" aria-label="Controles de rota">
+      <header class="brand">
+        <span class="brand__eyebrow">MVP UFU</span>
+        <h1>Roteador da planta baixa</h1>
+      </header>
+
+      <section class="upload-panel" aria-label="Atualizacao da planta DWG">
+        <div class="panel-title">
+          <span>Atualizar planta</span>
+        </div>
+        <form id="uploadForm" class="upload-form">
+          <label class="file-field" for="dwgFile">
+            <span id="dwgFileName">Selecionar DWG</span>
+            <input type="file" id="dwgFile" name="dwgFile" accept=".dwg">
+          </label>
+          <button type="submit" id="uploadBtn">Enviar</button>
+        </form>
+      </section>
+
+      <form class="route-form" id="routeForm">
+        <label class="field" for="originSelect">
+          <span>De</span>
+          <select id="originSelect" name="origin"></select>
+        </label>
+
+        <label class="field" for="destinationSelect">
+          <span>Para</span>
+          <select id="destinationSelect" name="destination"></select>
+        </label>
+
+        <div class="button-row">
+          <button type="submit" class="primary">Calcular rota</button>
+          <button type="button" id="swapBtn">Inverter</button>
+        </div>
+      </form>
+
+      <section class="voice-panel" aria-label="Comando de voz para os pontos">
+        <div class="panel-title">
+          <span>Comando de voz</span>
+          <button type="button" id="voiceBtn">Falar</button>
+        </div>
+        <form id="voiceCommandForm" class="voice-command-form">
+          <label class="field" for="voiceCommandInput">
+            <span>Comando manual</span>
+            <input type="text" id="voiceCommandInput" autocomplete="off" placeholder="origem N1 destino N5">
+          </label>
+          <button type="submit">Aplicar</button>
+        </form>
+        <p id="voiceState" class="voice-state">Diga origem N1 e destino N5.</p>
+      </section>
+
+      <div class="pick-panel" aria-label="Selecao por clique">
+        <span>Click no no define</span>
+        <div class="segmented" role="group" aria-label="Destino do click">
+          <button type="button" id="pickOriginBtn" class="is-active">De</button>
+          <button type="button" id="pickDestinationBtn">Para</button>
+        </div>
+      </div>
+
+      <section class="admin-panel" aria-label="Edicao de altura dos predios">
+        <div class="panel-title">
+          <span>Modo admin</span>
+          <button type="button" id="adminToggleBtn">Ativar</button>
+        </div>
+        <div id="adminEditor" class="admin-editor" hidden>
+          <label class="field" for="buildingSelect">
+            <span>Predio</span>
+            <select id="buildingSelect" name="building"></select>
+          </label>
+          <label class="field" for="buildingHeightInput">
+            <span>Altura em metros</span>
+            <input type="number" id="buildingHeightInput" min="1" max="120" step="0.5" inputmode="decimal">
+          </label>
+          <div class="button-row admin-actions">
+            <button type="button" class="primary" id="saveBuildingHeightBtn">Salvar</button>
+            <button type="button" id="resetBuildingHeightBtn">Padrao</button>
+          </div>
+          <button type="button" class="text-button" id="resetAllBuildingHeightsBtn">Restaurar todas as alturas</button>
+        </div>
+      </section>
+
+      <section class="result-panel" aria-live="polite">
+        <div class="metric-grid">
+          <div>
+            <span>Nos</span>
+            <strong id="nodeCount">0</strong>
+          </div>
+          <div>
+            <span>Ligacoes</span>
+            <strong id="edgeCount">0</strong>
+          </div>
+          <div>
+            <span>Distancia</span>
+            <strong id="routeDistance">-</strong>
+          </div>
+        </div>
+
+        <div class="route-output">
+          <span>Melhor caminho</span>
+          <strong id="pathText">-</strong>
+        </div>
+
+        <div class="route-output">
+          <span>Trechos usados</span>
+          <ol id="segmentList" class="segment-list"></ol>
+        </div>
+      </section>
+
+      <section class="nodes-panel">
+        <div class="panel-title">
+          <span>Nos da planta</span>
+          <button type="button" id="fitBtn">Centralizar</button>
+        </div>
+        <div id="nodeList" class="node-list"></div>
+      </section>
+
+      <p class="status" id="statusText">Carregando planta...</p>
+    </section>
+
+    <section class="map-panel" aria-label="Mapa da planta baixa">
+      <div class="view-switch" role="group" aria-label="Tipo de mapa">
+        <button type="button" id="svgViewBtn" class="is-active">Planta DWG</button>
+        <button type="button" id="mapboxViewBtn">Mapa 3D</button>
+      </div>
+
+      <div class="map-toolbar">
+        <button type="button" id="zoomInBtn" aria-label="Aproximar">+</button>
+        <button type="button" id="zoomOutBtn" aria-label="Afastar">-</button>
+        <button type="button" id="resetViewBtn">100%</button>
+      </div>
+
+      <svg id="campusMap" class="campus-map" role="img" aria-label="Planta baixa com rota calculada">
+        <defs>
+          <filter id="routeGlow" x="-40%" y="-40%" width="180%" height="180%">
+            <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#f59e0b" flood-opacity="0.65"/>
+          </filter>
+        </defs>
+        <g id="backgroundLayer"></g>
+        <g id="edgeLayer"></g>
+        <g id="routeLayer"></g>
+        <g id="nodeLayer"></g>
+      </svg>
+
+      <div id="mapboxMap" class="mapbox-map" aria-label="Mapa 3D do Campus Santa Monica"></div>
+    </section>
+  </main>
+
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

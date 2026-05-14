@@ -1,0 +1,4 @@
+(setvar "SECURELOAD" 0)
+(load "C:/Users/flaus/Downloads/Problema do Carteiro Viajante - Acessibilidade UFU/tools/export_dwg_map.lsp")
+(export-dwg-map "C:/Users/flaus/Downloads/Problema do Carteiro Viajante - Acessibilidade UFU/data/dwg-map-raw.json")
+_.QUIT

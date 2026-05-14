@@ -1,0 +1,28 @@
+# Runtime logs and local server output
+*.log
+*.err
+
+# Local database/runtime files
+data/*.sqlite
+data/*.sqlite-*
+
+# Uploaded DWG/Bak files are generated input history, not deploy assets
+data/uploads/
+
+# Local screenshots/inspection artifacts
+data/*screenshot*.png
+data/*inspect*.json
+data/export-*.json
+data/dwg-map-raw-*.json
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Dependency/build folders, if added later
+node_modules/
+dist/
+build/
+.vercel/
