@@ -337,6 +337,10 @@ function processVoiceCommand(transcript) {
   }
 
   refs.voiceState.textContent = `Nao entendi: ${transcript}.`;
+
+  if (command.includes("bloco") || command.includes("predio")) {
+    refs.voiceState.textContent = `Nao encontrei esse bloco no mapa carregado: ${transcript}. Verifique se o DWG foi reexportado com DESCRISSAO ou BLOCO nos nos.`;
+  }
 }
 
 function findNodeAfterVoiceKeyword(command, keywords) {
@@ -363,11 +367,11 @@ function findNodeAfterVoiceKeyword(command, keywords) {
 }
 
 function findNodeInVoiceText(text) {
-  const normalizedText = normalizeVoiceText(text);
+  const normalizedText = normalizeVoiceComparable(text);
 
   return state.nodes.find((node) => {
     return buildVoiceNodeAliases(node).some((alias) => {
-      const normalizedAlias = normalizeVoiceText(alias);
+      const normalizedAlias = normalizeVoiceComparable(alias);
       return normalizedText === normalizedAlias
         || normalizedText.includes(` ${normalizedAlias} `)
         || normalizedText.startsWith(`${normalizedAlias} `)
@@ -418,13 +422,26 @@ function buildVoiceNodeAliases(node) {
 function extractBlockAliases(value) {
   const normalized = normalizeVoiceText(value);
   const aliases = [];
-  const blockMatches = normalized.matchAll(/\b(?:bloco|predio)\s+([a-z0-9]+)\b/g);
+  const blockMatches = normalized.matchAll(/\b(?:bloco|predio)\s+(\d+\s*[a-z]?|[a-z]\s*\d+|[a-z0-9]+)\b/g);
 
   for (const match of blockMatches) {
-    aliases.push(match[0], `bloco ${match[1]}`, `predio ${match[1]}`);
+    const blockCode = match[1].replace(/\s+/g, "");
+    aliases.push(
+      match[0],
+      `bloco ${blockCode}`,
+      `predio ${blockCode}`,
+      `bloco ${blockCode.replace(/(\d)([a-z])/i, "$1 $2")}`,
+      `predio ${blockCode.replace(/(\d)([a-z])/i, "$1 $2")}`
+    );
   }
 
   return aliases;
+}
+
+function normalizeVoiceComparable(value) {
+  return normalizeVoiceText(value)
+    .replace(/\b(\d+)\s+([a-z])\b/g, "$1$2")
+    .replace(/\b([a-z])\s+(\d+)\b/g, "$1$2");
 }
 
 function normalizeVoiceText(value) {
