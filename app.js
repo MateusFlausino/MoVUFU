@@ -32,6 +32,7 @@ const state = {
   dragging: null,
   edges: [],
   graphReady: false,
+  gesturePointers: new Map(),
   mapboxReady: false,
   nodes: [],
   nodeById: new Map(),
@@ -118,6 +119,7 @@ function cacheDom() {
   refs.svg = document.getElementById("campusMap");
   refs.mapboxMap = document.getElementById("mapboxMap");
   refs.backgroundLayer = document.getElementById("backgroundLayer");
+  refs.buildingLayer = document.getElementById("buildingLayer");
   refs.edgeLayer = document.getElementById("edgeLayer");
   refs.routeLayer = document.getElementById("routeLayer");
   refs.nodeLayer = document.getElementById("nodeLayer");
@@ -153,6 +155,7 @@ function bindEvents() {
   refs.svg.addEventListener("pointermove", handlePointerMove);
   refs.svg.addEventListener("pointerup", stopDragging);
   refs.svg.addEventListener("pointerleave", stopDragging);
+  refs.svg.addEventListener("pointercancel", stopDragging);
   window.addEventListener("resize", updateNodeSizing);
 
   initializeVoiceRecognition();
@@ -1192,6 +1195,7 @@ function resetAllBuildingHeights() {
 
 function renderMap() {
   clearSvgLayer(refs.backgroundLayer);
+  clearSvgLayer(refs.buildingLayer);
   clearSvgLayer(refs.edgeLayer);
   clearSvgLayer(refs.nodeLayer);
   clearSvgLayer(refs.routeLayer);
@@ -1202,6 +1206,7 @@ function renderMap() {
 
   setViewBox(state.viewBox);
   renderBackground();
+  renderBuildings();
   renderEdges();
   renderNodes();
 }
@@ -1216,6 +1221,24 @@ function renderBackground() {
     path.dataset.layer = item.layer;
     path.dataset.type = item.type;
     refs.backgroundLayer.appendChild(path);
+  });
+}
+
+function renderBuildings() {
+  state.buildings.forEach((item, index) => {
+    if (!item.closed || item.points.length < 3) {
+      return;
+    }
+
+    const path = createSvgElement("path", {
+      class: `map-building is-building-${index % 6}`,
+      d: pointsToPath(item.points, true)
+    });
+
+    path.dataset.buildingId = item.id;
+    path.dataset.layer = item.layer;
+    path.dataset.type = item.type;
+    refs.buildingLayer.appendChild(path);
   });
 }
 
@@ -1920,8 +1943,20 @@ function handlePointerDown(event) {
     return;
   }
 
+  state.gesturePointers.set(event.pointerId, {
+    x: event.clientX,
+    y: event.clientY
+  });
   refs.svg.setPointerCapture(event.pointerId);
+
+  if (state.gesturePointers.size >= 2) {
+    state.dragging = createPinchGestureState();
+    refs.svg.classList.remove("is-dragging");
+    return;
+  }
+
   state.dragging = {
+    mode: "pan",
     pointerId: event.pointerId,
     x: event.clientX,
     y: event.clientY,
@@ -1931,7 +1966,25 @@ function handlePointerDown(event) {
 }
 
 function handlePointerMove(event) {
-  if (!state.dragging || event.pointerId !== state.dragging.pointerId) {
+  if (!state.gesturePointers.has(event.pointerId)) {
+    return;
+  }
+
+  state.gesturePointers.set(event.pointerId, {
+    x: event.clientX,
+    y: event.clientY
+  });
+
+  if (state.gesturePointers.size >= 2) {
+    if (!state.dragging || state.dragging.mode !== "pinch") {
+      state.dragging = createPinchGestureState();
+    }
+
+    handlePinchMove();
+    return;
+  }
+
+  if (!state.dragging || state.dragging.mode !== "pan" || event.pointerId !== state.dragging.pointerId) {
     return;
   }
 
@@ -1948,16 +2001,102 @@ function handlePointerMove(event) {
 }
 
 function stopDragging(event) {
-  if (!state.dragging) {
+  if (event?.pointerId !== undefined) {
+    state.gesturePointers.delete(event.pointerId);
+  } else {
+    state.gesturePointers.clear();
+  }
+
+  if (event?.pointerId !== undefined && refs.svg.hasPointerCapture(event.pointerId)) {
+    refs.svg.releasePointerCapture(event.pointerId);
+  }
+
+  if (state.gesturePointers.size >= 2) {
+    state.dragging = createPinchGestureState();
     return;
   }
 
-  if (event?.pointerId === state.dragging.pointerId && refs.svg.hasPointerCapture(event.pointerId)) {
-    refs.svg.releasePointerCapture(event.pointerId);
+  if (state.gesturePointers.size === 1) {
+    const [pointerId, pointer] = [...state.gesturePointers.entries()][0];
+    state.dragging = {
+      mode: "pan",
+      pointerId,
+      x: pointer.x,
+      y: pointer.y,
+      viewBox: { ...state.viewBox }
+    };
+    refs.svg.classList.add("is-dragging");
+    return;
   }
 
   state.dragging = null;
   refs.svg.classList.remove("is-dragging");
+}
+
+function createPinchGestureState() {
+  const pointers = [...state.gesturePointers.values()].slice(0, 2);
+  const center = getPointerCenter(pointers);
+
+  return {
+    mode: "pinch",
+    distance: getPointerDistance(pointers),
+    focalPoint: screenPointToSvgPoint(center),
+    viewBox: { ...state.viewBox }
+  };
+}
+
+function handlePinchMove() {
+  if (!state.dragging || state.dragging.mode !== "pinch" || !state.viewBox) {
+    return;
+  }
+
+  const pointers = [...state.gesturePointers.values()].slice(0, 2);
+  const distance = getPointerDistance(pointers);
+
+  if (!distance || !state.dragging.distance) {
+    return;
+  }
+
+  const center = getPointerCenter(pointers);
+  const focalPoint = screenPointToSvgPoint(center, state.dragging.viewBox);
+  const factor = clampNumber(state.dragging.distance / distance, 0.35, 2.8);
+  const nextWidth = state.dragging.viewBox.width * factor;
+  const nextHeight = state.dragging.viewBox.height * factor;
+  const xRatio = (focalPoint.x - state.dragging.viewBox.x) / state.dragging.viewBox.width;
+  const yRatio = (focalPoint.y - state.dragging.viewBox.y) / state.dragging.viewBox.height;
+
+  state.viewBox = {
+    x: focalPoint.x - nextWidth * xRatio,
+    y: focalPoint.y - nextHeight * yRatio,
+    width: nextWidth,
+    height: nextHeight
+  };
+  setViewBox(state.viewBox);
+  updateNodeSizing();
+}
+
+function getPointerDistance(pointers) {
+  if (pointers.length < 2) {
+    return 0;
+  }
+
+  return Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y);
+}
+
+function getPointerCenter(pointers) {
+  return {
+    x: (pointers[0].x + pointers[1].x) / 2,
+    y: (pointers[0].y + pointers[1].y) / 2
+  };
+}
+
+function screenPointToSvgPoint(point, viewBox = state.viewBox) {
+  const rect = refs.svg.getBoundingClientRect();
+
+  return {
+    x: viewBox.x + ((point.x - rect.left) / rect.width) * viewBox.width,
+    y: viewBox.y + ((point.y - rect.top) / rect.height) * viewBox.height
+  };
 }
 
 function zoomView(factor, focalPoint = null) {

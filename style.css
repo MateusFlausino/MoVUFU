@@ -543,6 +543,43 @@ input[type="text"] {
   vector-effect: non-scaling-stroke;
 }
 
+.map-building {
+  fill-opacity: 0.24;
+  stroke-width: 2.4;
+  stroke-opacity: 0.92;
+  vector-effect: non-scaling-stroke;
+}
+
+.map-building.is-building-0 {
+  fill: #0ea5e9;
+  stroke: #0284c7;
+}
+
+.map-building.is-building-1 {
+  fill: #22c55e;
+  stroke: #16a34a;
+}
+
+.map-building.is-building-2 {
+  fill: #a855f7;
+  stroke: #9333ea;
+}
+
+.map-building.is-building-3 {
+  fill: #f59e0b;
+  stroke: #d97706;
+}
+
+.map-building.is-building-4 {
+  fill: #14b8a6;
+  stroke: #0f766e;
+}
+
+.map-building.is-building-5 {
+  fill: #f43f5e;
+  stroke: #e11d48;
+}
+
 .map-route-casing,
 .map-route {
   fill: none;
