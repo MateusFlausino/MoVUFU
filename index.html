@@ -4,6 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Roteador da Planta UFU</title>
+  <meta name="theme-color" content="#007aff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="MoV UFU">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
   <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -11,6 +17,7 @@
   <main class="app-shell">
     <section class="control-panel" aria-label="Navegacao acessivel">
       <button type="button" id="toggleNavBtn" class="toggle-nav-btn" aria-expanded="true" aria-controls="navigatorCard">Ocultar</button>
+      <button type="button" id="installAppBtn" class="install-app-btn" hidden>Instalar app</button>
 
       <header class="brand">
         <span class="brand__eyebrow">MoV UFU</span>

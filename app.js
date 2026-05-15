@@ -33,6 +33,7 @@ const state = {
   edges: [],
   graphReady: false,
   gesturePointers: new Map(),
+  installPromptEvent: null,
   mapboxReady: false,
   nodes: [],
   nodeById: new Map(),
@@ -83,12 +84,71 @@ async function loadCurrentMapData(statusText = "Carregando planta...") {
   }
 }
 
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    return;
+  }
+
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((error) => {
+      console.warn("Nao foi possivel registrar o service worker.", error);
+    });
+  });
+}
+
+function prepareInstallHint() {
+  if (window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone) {
+    refs.installAppBtn.hidden = true;
+    return;
+  }
+
+  if (isIosDevice()) {
+    refs.installAppBtn.hidden = false;
+    refs.installAppBtn.textContent = "Instalar";
+  }
+}
+
+function handleBeforeInstallPrompt(event) {
+  event.preventDefault();
+  state.installPromptEvent = event;
+  refs.installAppBtn.hidden = false;
+  refs.installAppBtn.textContent = "Instalar";
+}
+
+async function installApp() {
+  if (state.installPromptEvent) {
+    state.installPromptEvent.prompt();
+    await state.installPromptEvent.userChoice.catch(() => null);
+    state.installPromptEvent = null;
+    refs.installAppBtn.hidden = true;
+    return;
+  }
+
+  if (isIosDevice()) {
+    setStatus("No iPhone, toque em Compartilhar e depois em Adicionar a Tela de Inicio.", "info");
+    return;
+  }
+
+  setStatus("Use o menu do navegador e escolha Instalar app ou Adicionar a tela inicial.", "info");
+}
+
+function handleAppInstalled() {
+  state.installPromptEvent = null;
+  refs.installAppBtn.hidden = true;
+  setStatus("MoV UFU instalado com sucesso.", "success");
+}
+
+function isIosDevice() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent);
+}
+
 function cacheDom() {
   refs.routeForm = document.getElementById("routeForm");
   refs.originSelect = document.getElementById("originSelect");
   refs.destinationSelect = document.getElementById("destinationSelect");
   refs.swapBtn = document.getElementById("swapBtn");
   refs.toggleNavBtn = document.getElementById("toggleNavBtn");
+  refs.installAppBtn = document.getElementById("installAppBtn");
   refs.navigatorCard = document.getElementById("navigatorCard");
   refs.voiceCommandForm = document.getElementById("voiceCommandForm");
   refs.voiceCommandInput = document.getElementById("voiceCommandInput");
@@ -137,6 +197,7 @@ function bindEvents() {
   refs.destinationSelect.addEventListener("change", calculateAndRenderRoute);
   refs.swapBtn.addEventListener("click", swapRouteEndpoints);
   refs.toggleNavBtn.addEventListener("click", toggleNavigatorCard);
+  refs.installAppBtn.addEventListener("click", installApp);
   refs.pickOriginBtn.addEventListener("click", () => setPickTarget("origin"));
   refs.pickDestinationBtn.addEventListener("click", () => setPickTarget("destination"));
   refs.adminToggleBtn.addEventListener("click", toggleAdminMode);
@@ -160,8 +221,12 @@ function bindEvents() {
   refs.svg.addEventListener("pointerleave", stopDragging);
   refs.svg.addEventListener("pointercancel", stopDragging);
   window.addEventListener("resize", updateNodeSizing);
+  window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+  window.addEventListener("appinstalled", handleAppInstalled);
 
   initializeVoiceRecognition();
+  registerServiceWorker();
+  prepareInstallHint();
 }
 
 function initializeVoiceRecognition() {

@@ -956,6 +956,27 @@ body {
   z-index: 9;
 }
 
+.install-app-btn {
+  position: absolute;
+  right: 14px;
+  top: max(64px, calc(env(safe-area-inset-top) + 64px));
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid rgba(216, 222, 230, 0.92);
+  border-radius: 999px;
+  background: #007aff;
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(0, 122, 255, 0.28);
+  font-size: 0.82rem;
+  font-weight: 850;
+  pointer-events: auto;
+  z-index: 9;
+}
+
+.install-app-btn[hidden] {
+  display: none;
+}
+
 .route-form,
 .voice-panel,
 .result-panel {
@@ -1141,6 +1162,11 @@ input[type="text"] {
   .toggle-nav-btn {
     right: 10px;
     bottom: calc(max(10px, env(safe-area-inset-bottom)) + 246px);
+  }
+
+  .install-app-btn {
+    right: 10px;
+    top: max(60px, calc(env(safe-area-inset-top) + 60px));
   }
 
   .route-form {
