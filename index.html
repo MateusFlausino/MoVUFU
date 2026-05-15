@@ -9,53 +9,64 @@
 </head>
 <body>
   <main class="app-shell">
-    <section class="control-panel" aria-label="Controles de rota">
+    <section class="control-panel" aria-label="Navegacao acessivel">
       <header class="brand">
         <span class="brand__eyebrow">MoV UFU</span>
-        <h1>Roteador acessivel</h1>
+        <h1>Para onde vamos?</h1>
       </header>
 
-      <form class="route-form" id="routeForm">
-        <label class="field" for="originSelect">
-          <span>De</span>
-          <select id="originSelect" name="origin"></select>
-        </label>
-
-        <label class="field" for="destinationSelect">
-          <span>Para</span>
-          <select id="destinationSelect" name="destination"></select>
-        </label>
-
-        <div class="button-row">
-          <button type="submit" class="primary">Calcular rota</button>
-          <button type="button" id="swapBtn">Inverter</button>
-        </div>
-      </form>
-
-      <section class="voice-panel" aria-label="Comando de voz para os pontos">
-        <div class="panel-title">
-          <span>Comando de voz</span>
-          <button type="button" id="voiceBtn">Falar</button>
-        </div>
-        <form id="voiceCommandForm" class="voice-command-form">
-          <label class="field" for="voiceCommandInput">
-            <span>Comando manual</span>
-            <input type="text" id="voiceCommandInput" autocomplete="off" placeholder="origem N1 destino N5">
+      <div class="navigator-card">
+        <form class="route-form" id="routeForm">
+          <label class="field" for="originSelect">
+            <span>Saindo de</span>
+            <select id="originSelect" name="origin"></select>
           </label>
-          <button type="submit">Aplicar</button>
-        </form>
-        <p id="voiceState" class="voice-state">Diga origem N1 e destino N5.</p>
-      </section>
 
-      <div class="pick-panel" aria-label="Selecao por clique">
+          <button type="button" id="swapBtn" class="swap-route-btn" aria-label="Inverter origem e destino">Trocar</button>
+
+          <label class="field" for="destinationSelect">
+            <span>Indo para</span>
+            <select id="destinationSelect" name="destination"></select>
+          </label>
+
+          <button type="submit" class="primary route-action">Traçar rota</button>
+        </form>
+
+        <section class="voice-panel" aria-label="Comando de voz para os pontos">
+          <form id="voiceCommandForm" class="voice-command-form">
+            <label class="field" for="voiceCommandInput">
+              <span>Buscar por voz ou texto</span>
+              <input type="text" id="voiceCommandInput" autocomplete="off" placeholder="De bloco 1E para bloco 3E">
+            </label>
+            <button type="submit" aria-label="Aplicar comando digitado">Ir</button>
+          </form>
+          <button type="button" id="voiceBtn" class="voice-fab" aria-label="Falar destino">🎙</button>
+          <p id="voiceState" class="voice-state">Toque no microfone e diga o destino.</p>
+        </section>
+
+        <section class="result-panel" aria-live="polite">
+          <div class="route-output route-summary">
+            <span>Rota acessivel</span>
+            <strong id="routeDistance">-</strong>
+          </div>
+
+          <div class="route-output">
+            <span>Caminho</span>
+            <strong id="pathText">Escolha origem e destino.</strong>
+          </div>
+        </section>
+      </div>
+
+      <div class="technical-panel" aria-hidden="true">
+        <div class="pick-panel" aria-label="Selecao por clique">
         <span>Click no no define</span>
         <div class="segmented" role="group" aria-label="Destino do click">
           <button type="button" id="pickOriginBtn" class="is-active">De</button>
           <button type="button" id="pickDestinationBtn">Para</button>
         </div>
-      </div>
+        </div>
 
-      <section class="admin-panel" aria-label="Edicao de altura dos predios">
+        <section class="admin-panel" aria-label="Edicao de altura dos predios">
         <div class="panel-title">
           <span>Modo admin</span>
           <button type="button" id="adminToggleBtn">Ativar</button>
@@ -75,9 +86,8 @@
           </div>
           <button type="button" class="text-button" id="resetAllBuildingHeightsBtn">Restaurar todas as alturas</button>
         </div>
-      </section>
+        </section>
 
-      <section class="result-panel" aria-live="polite">
         <div class="metric-grid">
           <div>
             <span>Nos</span>
@@ -87,36 +97,27 @@
             <span>Ligacoes</span>
             <strong id="edgeCount">0</strong>
           </div>
-          <div>
-            <span>Distancia</span>
-            <strong id="routeDistance">-</strong>
-          </div>
-        </div>
-
-        <div class="route-output">
-          <span>Melhor caminho</span>
-          <strong id="pathText">-</strong>
         </div>
 
         <div class="route-output">
           <span>Trechos usados</span>
           <ol id="segmentList" class="segment-list"></ol>
         </div>
-      </section>
 
-      <section class="nodes-panel">
+        <section class="nodes-panel">
         <div class="panel-title">
           <span>Nos da planta</span>
           <button type="button" id="fitBtn">Centralizar</button>
         </div>
         <div id="nodeList" class="node-list"></div>
-      </section>
+        </section>
+      </div>
 
       <p class="status" id="statusText">Carregando planta...</p>
     </section>
 
     <section class="map-panel" aria-label="Mapa da planta baixa">
-      <div class="view-switch" role="group" aria-label="Tipo de mapa">
+      <div class="view-switch technical-panel" role="group" aria-label="Tipo de mapa" aria-hidden="true">
         <button type="button" id="svgViewBtn" class="is-active">Planta DWG</button>
         <button type="button" id="mapboxViewBtn">Mapa 3D</button>
       </div>

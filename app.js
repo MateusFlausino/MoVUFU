@@ -178,7 +178,7 @@ function initializeVoiceRecognition() {
     state.voiceHadResult = false;
     state.voiceLastError = null;
     state.voiceSpeechDetected = false;
-    refs.voiceBtn.textContent = "Ouvindo";
+    refs.voiceBtn.textContent = "●";
     refs.voiceBtn.classList.add("is-listening");
     refs.voicePanel.classList.add("is-listening");
     refs.voiceState.textContent = "Ouvindo...";
@@ -203,7 +203,7 @@ function initializeVoiceRecognition() {
 
   recognition.addEventListener("end", () => {
     state.voiceListening = false;
-    refs.voiceBtn.textContent = "Falar";
+    refs.voiceBtn.textContent = "🎙";
     refs.voiceBtn.classList.remove("is-listening");
     refs.voicePanel.classList.remove("is-listening");
 
