@@ -88,6 +88,8 @@ function cacheDom() {
   refs.originSelect = document.getElementById("originSelect");
   refs.destinationSelect = document.getElementById("destinationSelect");
   refs.swapBtn = document.getElementById("swapBtn");
+  refs.toggleNavBtn = document.getElementById("toggleNavBtn");
+  refs.navigatorCard = document.getElementById("navigatorCard");
   refs.voiceCommandForm = document.getElementById("voiceCommandForm");
   refs.voiceCommandInput = document.getElementById("voiceCommandInput");
   refs.voiceBtn = document.getElementById("voiceBtn");
@@ -134,6 +136,7 @@ function bindEvents() {
   refs.originSelect.addEventListener("change", calculateAndRenderRoute);
   refs.destinationSelect.addEventListener("change", calculateAndRenderRoute);
   refs.swapBtn.addEventListener("click", swapRouteEndpoints);
+  refs.toggleNavBtn.addEventListener("click", toggleNavigatorCard);
   refs.pickOriginBtn.addEventListener("click", () => setPickTarget("origin"));
   refs.pickDestinationBtn.addEventListener("click", () => setPickTarget("destination"));
   refs.adminToggleBtn.addEventListener("click", toggleAdminMode);
@@ -1776,6 +1779,12 @@ function swapRouteEndpoints() {
   refs.originSelect.value = refs.destinationSelect.value;
   refs.destinationSelect.value = originId;
   calculateAndRenderRoute();
+}
+
+function toggleNavigatorCard() {
+  const collapsed = refs.navigatorCard.classList.toggle("is-collapsed");
+  refs.toggleNavBtn.textContent = collapsed ? "Mostrar" : "Ocultar";
+  refs.toggleNavBtn.setAttribute("aria-expanded", String(!collapsed));
 }
 
 function selectNodeFromMap(nodeId) {

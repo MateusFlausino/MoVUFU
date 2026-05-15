@@ -928,6 +928,32 @@ body {
   box-shadow: 0 24px 60px rgba(18, 32, 46, 0.22);
   backdrop-filter: blur(16px);
   pointer-events: auto;
+  transform: translateY(0);
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.navigator-card.is-collapsed {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(calc(100% + 28px));
+}
+
+.toggle-nav-btn {
+  position: absolute;
+  right: 14px;
+  bottom: calc(max(16px, env(safe-area-inset-bottom)) + 254px);
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid rgba(216, 222, 230, 0.92);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--text);
+  box-shadow: 0 10px 26px rgba(18, 32, 46, 0.16);
+  font-size: 0.82rem;
+  font-weight: 850;
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+  z-index: 9;
 }
 
 .route-form,
@@ -1110,6 +1136,11 @@ input[type="text"] {
     gap: 9px;
     padding: 10px;
     border-radius: 16px;
+  }
+
+  .toggle-nav-btn {
+    right: 10px;
+    bottom: calc(max(10px, env(safe-area-inset-bottom)) + 246px);
   }
 
   .route-form {

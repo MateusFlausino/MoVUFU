@@ -10,12 +10,14 @@
 <body>
   <main class="app-shell">
     <section class="control-panel" aria-label="Navegacao acessivel">
+      <button type="button" id="toggleNavBtn" class="toggle-nav-btn" aria-expanded="true" aria-controls="navigatorCard">Ocultar</button>
+
       <header class="brand">
         <span class="brand__eyebrow">MoV UFU</span>
         <h1>Para onde vamos?</h1>
       </header>
 
-      <div class="navigator-card">
+      <div class="navigator-card" id="navigatorCard">
         <form class="route-form" id="routeForm">
           <label class="field" for="originSelect">
             <span>Saindo de</span>
