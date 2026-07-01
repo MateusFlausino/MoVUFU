@@ -1,4 +1,5 @@
 const DATA_URL = "data/dwg-map-raw.json";
+const OSM_ACCESSIBILITY_URL = "data/osm-santa-monica-accessibility.geojson";
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DUPLICATE_POINT_EPSILON = 0.000001;
 const MILLIMETERS_PER_METER = 1000;
@@ -39,6 +40,9 @@ const state = {
   mapboxReady: false,
   nodes: [],
   nodeById: new Map(),
+  osmAccessibilityLayer: null,
+  osmMap: null,
+  osmReady: false,
   pickTarget: "origin",
   rawData: null,
   rawRouteBounds: null,
@@ -63,6 +67,7 @@ async function initializeApp() {
   cacheDom();
   bindEvents();
   initializeMapboxMap();
+  initializeOsmMap();
   await loadCurrentMapData();
 }
 
@@ -181,8 +186,10 @@ function cacheDom() {
   refs.resetViewBtn = document.getElementById("resetViewBtn");
   refs.svgViewBtn = document.getElementById("svgViewBtn");
   refs.mapboxViewBtn = document.getElementById("mapboxViewBtn");
+  refs.osmViewBtn = document.getElementById("osmViewBtn");
   refs.svg = document.getElementById("campusMap");
   refs.mapboxMap = document.getElementById("mapboxMap");
+  refs.osmMap = document.getElementById("osmMap");
   refs.backgroundLayer = document.getElementById("backgroundLayer");
   refs.buildingLayer = document.getElementById("buildingLayer");
   refs.edgeLayer = document.getElementById("edgeLayer");
@@ -214,6 +221,7 @@ function bindEvents() {
   refs.resetViewBtn.addEventListener("click", resetView);
   refs.svgViewBtn.addEventListener("click", () => setViewMode("svg"));
   refs.mapboxViewBtn.addEventListener("click", () => setViewMode("mapbox"));
+  refs.osmViewBtn.addEventListener("click", () => setViewMode("osm"));
   refs.voiceBtn.addEventListener("click", toggleVoiceRecognition);
   refs.voiceCommandForm.addEventListener("submit", handleManualVoiceCommand);
 
@@ -695,6 +703,97 @@ function initializeMapboxMap() {
   });
 }
 
+function initializeOsmMap() {
+  if (!refs.osmMap || !window.L) {
+    refs.osmViewBtn.disabled = true;
+    refs.osmViewBtn.title = "OpenStreetMap nao foi carregado.";
+    return;
+  }
+
+  const map = L.map(refs.osmMap, {
+    attributionControl: true,
+    zoomControl: false
+  }).setView([-18.9195, -48.258], 16);
+
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 20,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+  L.control.zoom({ position: "topright" }).addTo(map);
+
+  const legend = L.control({ position: "bottomleft" });
+  legend.onAdd = () => {
+    const container = L.DomUtil.create("div", "osm-legend");
+    container.innerHTML = [
+      "<strong>Acessibilidade UFU</strong>",
+      '<span class="osm-legend__item"><i class="osm-legend__line"></i>Caminho de pedestres</span>',
+      '<span class="osm-legend__item"><i class="osm-legend__point"></i>Travessia / rampa candidata</span>',
+      '<small class="osm-legend__warning">Confirmar rampas em campo antes de indicar rota acessivel.</small>'
+    ].join("");
+    return container;
+  };
+  legend.addTo(map);
+
+  state.osmMap = map;
+  loadOsmAccessibilityLayer();
+}
+
+async function loadOsmAccessibilityLayer() {
+  try {
+    const response = await fetch(`${OSM_ACCESSIBILITY_URL}?v=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error("dados OSM indisponiveis");
+    }
+
+    const geoJson = await response.json();
+    const layer = L.geoJSON(geoJson, {
+      style(feature) {
+        const isSteps = feature?.properties?.highway === "steps";
+        const isCrossing = feature?.properties?.footway === "crossing";
+        return {
+          color: isSteps ? "#dc2626" : isCrossing ? "#2563eb" : "#0f766e",
+          dashArray: isSteps ? "7 6" : null,
+          lineCap: "round",
+          lineJoin: "round",
+          opacity: 0.9,
+          weight: isCrossing ? 6 : 5
+        };
+      },
+      pointToLayer(feature, latlng) {
+        return L.circleMarker(latlng, {
+          radius: 7,
+          fillColor: "#f97316",
+          fillOpacity: 0.95,
+          color: "#ffffff",
+          opacity: 1,
+          weight: 3
+        });
+      },
+      onEachFeature(feature, featureLayer) {
+        const properties = feature?.properties || {};
+        if (feature?.geometry?.type === "Point") {
+          featureLayer.bindPopup([
+            "<strong>Travessia mapeada</strong>",
+            properties.crossing ? `<br>Tipo: ${properties.crossing}` : "",
+            properties.tactile_paving ? `<br>Piso tatil: ${properties.tactile_paving}` : "",
+            "<br><em>Verificar se existe rampa/rebaixamento.</em>"
+          ].join(""));
+        }
+      }
+    }).addTo(state.osmMap);
+
+    state.osmAccessibilityLayer = layer;
+    state.osmReady = true;
+    if (layer.getBounds().isValid()) {
+      state.osmMap.fitBounds(layer.getBounds(), { padding: [28, 28] });
+    }
+  } catch (error) {
+    console.warn("Nao foi possivel carregar os caminhos OpenStreetMap.", error);
+    refs.osmViewBtn.disabled = true;
+    refs.osmViewBtn.title = "Caminhos OpenStreetMap indisponiveis.";
+  }
+}
+
 function addMapboxBaseControls() {
   state.threeDMap.addControl(new mapboxgl.NavigationControl(), "top-right");
   state.threeDMap.addControl(new mapboxgl.FullscreenControl(), "top-right");
@@ -939,16 +1038,25 @@ function addMapboxAccessibilityLayers() {
 }
 
 function setViewMode(mode) {
-  state.viewMode = mode === "mapbox" ? "mapbox" : "svg";
-  refs.svg.classList.toggle("is-hidden", state.viewMode === "mapbox");
+  state.viewMode = ["mapbox", "osm"].includes(mode) ? mode : "svg";
+  refs.svg.classList.toggle("is-hidden", state.viewMode !== "svg");
   refs.mapboxMap.classList.toggle("is-active", state.viewMode === "mapbox");
+  refs.osmMap.classList.toggle("is-active", state.viewMode === "osm");
   refs.svgViewBtn.classList.toggle("is-active", state.viewMode === "svg");
   refs.mapboxViewBtn.classList.toggle("is-active", state.viewMode === "mapbox");
-  refs.zoomInBtn.parentElement.classList.toggle("is-hidden", state.viewMode === "mapbox");
+  refs.osmViewBtn.classList.toggle("is-active", state.viewMode === "osm");
+  refs.zoomInBtn.parentElement.classList.toggle("is-hidden", state.viewMode !== "svg");
 
   if (state.viewMode === "mapbox" && state.threeDMap) {
     state.threeDMap.resize();
     fitMapboxAccessibilityBounds();
+  }
+
+  if (state.viewMode === "osm" && state.osmMap) {
+    state.osmMap.invalidateSize();
+    if (state.osmAccessibilityLayer?.getBounds().isValid()) {
+      state.osmMap.fitBounds(state.osmAccessibilityLayer.getBounds(), { padding: [28, 28] });
+    }
   }
 }
 

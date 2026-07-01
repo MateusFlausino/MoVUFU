@@ -11,6 +11,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="assets/icon-192.png">
   <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
+  <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -126,8 +127,9 @@
     </section>
 
     <section class="map-panel" aria-label="Mapa da planta baixa">
-      <div class="view-switch technical-panel" role="group" aria-label="Tipo de mapa" aria-hidden="true">
-        <button type="button" id="svgViewBtn" class="is-active">Planta DWG</button>
+      <div class="view-switch" role="group" aria-label="Tipo de mapa">
+        <button type="button" id="svgViewBtn" class="is-active">Planta UFU</button>
+        <button type="button" id="osmViewBtn">OpenStreetMap</button>
         <button type="button" id="mapboxViewBtn">Mapa 3D</button>
       </div>
 
@@ -151,10 +153,12 @@
       </svg>
 
       <div id="mapboxMap" class="mapbox-map" aria-label="Mapa 3D do Campus Santa Monica"></div>
+      <div id="osmMap" class="osm-map" aria-label="OpenStreetMap com caminhos de pedestres e travessias do Campus Santa Monica"></div>
     </section>
   </main>
 
   <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
