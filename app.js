@@ -4,7 +4,8 @@ const OSM_OVERPASS_URLS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter"
 ];
-const OSM_CAMPUS_BBOX = [-18.932, -48.271, -18.907, -48.245];
+const OSM_CAMPUS_BOUNDARY_ID = 804592441;
+const OSM_CAMPUS_BBOX = [-18.9208408, -48.2622730, -18.9159454, -48.2539403];
 const OSM_LIVE_TIMEOUT_MS = 20000;
 const OSM_ROUTABLE_HIGHWAYS = new Set([
   "footway", "path", "pedestrian", "steps", "living_street",
@@ -755,13 +756,45 @@ function initializeOsmMap() {
 
   const map = L.map(refs.osmMap, {
     attributionControl: true,
-    zoomControl: false
-  }).setView([-18.9195, -48.258], 16);
+    zoomControl: false,
+    maxBounds: [
+      [OSM_CAMPUS_BBOX[0], OSM_CAMPUS_BBOX[1]],
+      [OSM_CAMPUS_BBOX[2], OSM_CAMPUS_BBOX[3]]
+    ],
+    maxBoundsViscosity: 1,
+    minZoom: 16
+  }).setView([-18.9184, -48.2581], 17);
 
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  const osmBaseLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 20,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  });
+  const esriImageryLayer = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    {
+      maxZoom: 20,
+      attribution: "Tiles &copy; Esri"
+    }
+  );
+  const savedBaseLayer = window.localStorage?.getItem("movufu-osm-base-layer");
+  (savedBaseLayer === "esri" ? esriImageryLayer : osmBaseLayer).addTo(map);
+  L.control.layers({
+    "OpenStreetMap (padrao)": osmBaseLayer,
+    "Imagens globais da Esri": esriImageryLayer
+  }, null, {
+    collapsed: true,
+    position: "topright"
   }).addTo(map);
+  map.on("baselayerchange", (event) => {
+    const layerId = event.layer === esriImageryLayer ? "esri" : "osm";
+    window.localStorage?.setItem("movufu-osm-base-layer", layerId);
+    setStatus(
+      layerId === "esri"
+        ? "Plano de fundo alterado para Imagens globais da Esri. As rotas continuam usando OpenStreetMap."
+        : "Plano de fundo alterado para OpenStreetMap padrao.",
+      "info"
+    );
+  });
   L.control.zoom({ position: "topright" }).addTo(map);
 
   const legend = L.control({ position: "bottomleft" });
@@ -771,6 +804,7 @@ function initializeOsmMap() {
       "<strong>Acessibilidade UFU</strong>",
       '<span class="osm-legend__item"><i class="osm-legend__line"></i>Caminho de pedestres</span>',
       '<span class="osm-legend__item"><i class="osm-legend__point"></i>Travessia / rampa candidata</span>',
+      '<span class="osm-legend__item"><i class="osm-legend__building"></i>Delimitacao dos blocos</span>',
       '<small class="osm-legend__warning">Confirmar rampas em campo antes de indicar rota acessivel.</small>'
     ].join("");
     return container;
@@ -790,6 +824,9 @@ async function loadOsmAccessibilityLayer() {
     updateMapboxOsmData();
     const layer = L.geoJSON(geoJson, {
       style(feature) {
+        if (feature?.properties?.feature_class === "building_outline") {
+          return { color: "#dc2626", fillColor: "#ef4444", fillOpacity: 0.12, opacity: 0.8, weight: 2 };
+        }
         const isSteps = feature?.properties?.highway === "steps";
         const isCrossing = feature?.properties?.footway === "crossing";
         return {
@@ -872,12 +909,14 @@ async function fetchLiveOsmGeoJson() {
   const [south, west, north, east] = OSM_CAMPUS_BBOX;
   const bbox = `${south},${west},${north},${east}`;
   const query = `[out:json][timeout:18];(
+    way(${OSM_CAMPUS_BOUNDARY_ID});
     way["highway"~"^(footway|path|pedestrian|steps|living_street|residential|service|unclassified|track)$"](${bbox});
     node["highway"="crossing"](${bbox});
     node["kerb"~"^(lowered|flush)$"](${bbox});
     node["wheelchair"](${bbox});
     node["tactile_paving"](${bbox});
     node["entrance"](${bbox});
+    way["building"](${bbox});
     nwr["name"]["building"](${bbox}); nwr["ref"]["building"](${bbox});
     nwr["name"]["amenity"](${bbox}); nwr["ref"]["amenity"](${bbox});
     nwr["name"]["entrance"](${bbox}); nwr["ref"]["entrance"](${bbox});
@@ -913,13 +952,32 @@ function overpassToGeoJson(data) {
   let pathwayCount = 0;
   let accessibilityPointCount = 0;
   let destinationCount = 0;
+  const boundaryElement = (data.elements || []).find(
+    (element) => element.type === "way" && element.id === OSM_CAMPUS_BOUNDARY_ID
+  );
+  const campusBoundary = (boundaryElement?.geometry || []).map((point) => [point.lon, point.lat]);
 
   (data.elements || []).forEach((element) => {
     const properties = element.tags || {};
     const id = `${element.type}/${element.id}`;
+    if (element.type === "way" && properties.building) {
+      const outline = (element.geometry || []).map((point) => [point.lon, point.lat]);
+      const center = element.center ? [element.center.lon, element.center.lat] : outline[0];
+      if (outline.length >= 3 && osmPointInPolygon(center, campusBoundary)) {
+        if (osmCoordinateKey(outline[0]) !== osmCoordinateKey(outline.at(-1))) {
+          outline.push(outline[0]);
+        }
+        features.push({
+          type: "Feature",
+          id: `building/${id}`,
+          properties: { osm_id: element.id, feature_class: "building_outline", ...properties },
+          geometry: { type: "Polygon", coordinates: [outline] }
+        });
+      }
+    }
     if (element.type === "way" && isOsmRoutableWay(properties)) {
       const coordinates = (element.geometry || []).map((point) => [point.lon, point.lat]);
-      if (coordinates.length >= 2) {
+      if (coordinates.length >= 2 && coordinates.some((coordinate) => osmPointInPolygon(coordinate, campusBoundary))) {
         features.push({ type: "Feature", id, properties: { osm_id: element.id, feature_class: "pedestrian_path", ...properties }, geometry: { type: "LineString", coordinates } });
         pathwayCount += 1;
       }
@@ -930,6 +988,9 @@ function overpassToGeoJson(data) {
       ? [element.lon, element.lat]
       : element.center ? [element.center.lon, element.center.lat] : null;
     if (!coordinate || coordinate.some((value) => !Number.isFinite(value))) {
+      return;
+    }
+    if (element.id === OSM_CAMPUS_BOUNDARY_ID || !osmPointInPolygon(coordinate, campusBoundary)) {
       return;
     }
 
@@ -984,6 +1045,24 @@ function overpassToGeoJson(data) {
     },
     features
   };
+}
+
+function osmPointInPolygon(point, polygon) {
+  if (!Array.isArray(polygon) || polygon.length < 3) {
+    return true;
+  }
+  const [x, y] = point;
+  let inside = false;
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current, current += 1) {
+    const [x1, y1] = polygon[previous];
+    const [x2, y2] = polygon[current];
+    const crosses = (y1 > y) !== (y2 > y)
+      && x < ((x2 - x1) * (y - y1)) / ((y2 - y1) || Number.EPSILON) + x1;
+    if (crosses) {
+      inside = !inside;
+    }
+  }
+  return inside;
 }
 
 function isOsmRoutableWay(properties = {}) {

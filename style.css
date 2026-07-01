@@ -562,6 +562,13 @@ input[type="text"] {
   box-shadow: 0 0 0 2px #9a3412;
 }
 
+.osm-legend__building {
+  width: 18px;
+  height: 13px;
+  border: 2px solid #dc2626;
+  background: rgba(239, 68, 68, 0.18);
+}
+
 .osm-legend__warning {
   display: block;
   margin-top: 7px;

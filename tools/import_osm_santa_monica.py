@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-BBOX = (-48.271, -18.932, -48.245, -18.907)  # oeste, sul, leste, norte
+BBOX = (-48.2622730, -18.9208408, -48.2539403, -18.9159454)  # oeste, sul, leste, norte
 OSM_MAP_URL = (
     "https://api.openstreetmap.org/api/0.6/map"
     f"?bbox={BBOX[0]},{BBOX[1]},{BBOX[2]},{BBOX[3]}"
@@ -129,11 +129,41 @@ def build_geojson(osm_xml: bytes) -> dict:
         node.attrib["id"]: (float(node.attrib["lon"]), float(node.attrib["lat"]))
         for node in node_elements
     }
+    campus_boundary = find_campus_boundary(ways, nodes)
     features = []
     pathway_count = 0
     point_count = 0
     destination_count = 0
     destination_keys: set[tuple[str, str]] = set()
+
+    for way in ways:
+        way_tags = tags(way)
+        if not way_tags.get("building"):
+            continue
+        coordinates = [
+            nodes[nd.attrib["ref"]]
+            for nd in way.findall("nd")
+            if nd.attrib["ref"] in nodes
+        ]
+        if len(coordinates) < 3:
+            continue
+        coordinate = polygon_centroid(coordinates)
+        if not point_in_polygon(coordinate, campus_boundary):
+            continue
+        if coordinates[0] != coordinates[-1]:
+            coordinates.append(coordinates[0])
+        features.append(
+            {
+                "type": "Feature",
+                "id": f"building/way/{way.attrib['id']}",
+                "properties": {
+                    "osm_id": way.attrib["id"],
+                    "feature_class": "building_outline",
+                    **way_tags,
+                },
+                "geometry": {"type": "Polygon", "coordinates": [coordinates]},
+            }
+        )
 
     for way in ways:
         way_tags = tags(way)
@@ -145,7 +175,7 @@ def build_geojson(osm_xml: bytes) -> dict:
             if nd.attrib["ref"] in nodes
         ]
         if len(coordinates) < 2 or not any(
-            point_in_bbox(coordinate) for coordinate in coordinates
+            point_in_polygon(coordinate, campus_boundary) for coordinate in coordinates
         ):
             continue
         features.append(
@@ -166,7 +196,7 @@ def build_geojson(osm_xml: bytes) -> dict:
         node_tags = tags(node)
         coordinate = nodes[node.attrib["id"]]
         is_entrance = "entrance" in node_tags
-        if (not is_accessibility_node(node_tags) and not is_entrance) or not point_in_bbox(coordinate):
+        if (not is_accessibility_node(node_tags) and not is_entrance) or not point_in_polygon(coordinate, campus_boundary):
             continue
         features.append(
             {
@@ -195,7 +225,7 @@ def build_geojson(osm_xml: bytes) -> dict:
         if len(coordinates) < 3:
             continue
         coordinate = polygon_centroid(coordinates)
-        if not point_in_bbox(coordinate):
+        if not point_in_polygon(coordinate, campus_boundary):
             continue
         label = way_tags.get("ref") or way_tags.get("name") or way.attrib["id"]
         key = (label.casefold(), way_tags.get("name", "").casefold())
@@ -220,7 +250,7 @@ def build_geojson(osm_xml: bytes) -> dict:
     for node in node_elements:
         node_tags = tags(node)
         coordinate = nodes[node.attrib["id"]]
-        if not is_destination(node_tags) or not point_in_bbox(coordinate):
+        if not is_destination(node_tags) or not point_in_polygon(coordinate, campus_boundary):
             continue
         label = node_tags.get("ref") or node_tags.get("name") or node.attrib["id"]
         key = (label.casefold(), node_tags.get("name", "").casefold())
