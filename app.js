@@ -19,6 +19,8 @@ const MAPBOX_BUILDING_MAX_COUNT = 240;
 const BUILDING_HEIGHT_STORAGE_PREFIX = "ufu-building-heights:";
 const DEFAULT_BUILDING_HEIGHT_MIN = 1;
 const DEFAULT_BUILDING_HEIGHT_MAX = 120;
+const VOICE_LISTENING_TIMEOUT_MS = 15000;
+const VOICE_MAX_ALTERNATIVES = 5;
 
 const state = {
   adjacency: new Map(),
@@ -48,6 +50,7 @@ const state = {
   voiceListening: false,
   voiceSpeechDetected: false,
   voiceRecognition: null,
+  voiceStopTimer: null,
   viewMode: "svg",
   viewBox: null
 };
@@ -241,8 +244,8 @@ function initializeVoiceRecognition() {
   const recognition = new SpeechRecognition();
   recognition.lang = "pt-BR";
   recognition.continuous = false;
-  recognition.interimResults = false;
-  recognition.maxAlternatives = 1;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = VOICE_MAX_ALTERNATIVES;
 
   recognition.addEventListener("start", () => {
     state.voiceListening = true;
@@ -253,6 +256,8 @@ function initializeVoiceRecognition() {
     refs.voiceBtn.classList.add("is-listening");
     refs.voicePanel.classList.add("is-listening");
     refs.voiceState.textContent = "Ouvindo...";
+    clearTimeout(state.voiceStopTimer);
+    state.voiceStopTimer = setTimeout(() => recognition.stop(), VOICE_LISTENING_TIMEOUT_MS);
   });
 
   recognition.addEventListener("audiostart", () => {
@@ -274,6 +279,8 @@ function initializeVoiceRecognition() {
 
   recognition.addEventListener("end", () => {
     state.voiceListening = false;
+    clearTimeout(state.voiceStopTimer);
+    state.voiceStopTimer = null;
     refs.voiceBtn.textContent = "🎙";
     refs.voiceBtn.classList.remove("is-listening");
     refs.voicePanel.classList.remove("is-listening");
@@ -289,9 +296,32 @@ function initializeVoiceRecognition() {
   });
 
   recognition.addEventListener("result", (event) => {
+    const result = event.results?.[event.resultIndex];
+
+    if (!result) {
+      return;
+    }
+
+    const alternatives = Array.from(result)
+      .map((alternative) => ({
+        confidence: Number(alternative.confidence || 0),
+        transcript: String(alternative.transcript || "").trim()
+      }))
+      .filter((alternative) => alternative.transcript);
+    const bestAlternative = selectBestVoiceAlternative(alternatives);
+
+    if (!result.isFinal) {
+      refs.voiceState.textContent = bestAlternative
+        ? `Ouvindo: ${bestAlternative.transcript}...`
+        : "Ouvindo...";
+      return;
+    }
+
     state.voiceHadResult = true;
-    const transcript = event.results?.[0]?.[0]?.transcript || "";
-    processVoiceCommand(transcript);
+    clearTimeout(state.voiceStopTimer);
+    state.voiceStopTimer = null;
+    recognition.stop();
+    processVoiceCommand(bestAlternative?.transcript || alternatives[0]?.transcript || "");
   });
 
   state.voiceRecognition = recognition;
@@ -367,7 +397,7 @@ function handleManualVoiceCommand(event) {
 
 function processVoiceCommand(transcript) {
   const command = normalizeVoiceText(transcript);
-  const originId = findNodeAfterVoiceKeyword(command, ["origem", "de", "partida", "inicio"]);
+  const originId = findNodeAfterVoiceKeyword(command, ["origem", "de", "do", "da", "dos", "das", "desde", "partida", "inicio", "saindo"]);
   const destinationId = findNodeAfterVoiceKeyword(command, ["destino", "para", "ate", "chegada", "fim"]);
   let changed = false;
 
@@ -395,8 +425,9 @@ function processVoiceCommand(transcript) {
 
   const looseNodeId = findNodeInVoiceText(command);
   if (looseNodeId) {
-    selectNodeFromMap(looseNodeId);
-    refs.voiceState.textContent = `Comando: ${transcript}. Ponto ${looseNodeId} selecionado.`;
+    refs.destinationSelect.value = looseNodeId;
+    calculateAndRenderRoute();
+    refs.voiceState.textContent = `Entendi “${transcript}”. Destino: ${getNodeOptionLabel(state.nodeById.get(looseNodeId))}.`;
     return;
   }
 
@@ -415,7 +446,7 @@ function findNodeAfterVoiceKeyword(command, keywords) {
 
     if (keywordIndex !== -1) {
       const nextStopIndex = words.findIndex((word, index) => {
-        return index > keywordIndex && ["origem", "de", "destino", "para", "ate", "chegada", "fim"].includes(word);
+        return index > keywordIndex && ["origem", "de", "do", "da", "dos", "das", "destino", "para", "ate", "chegada", "fim"].includes(word);
       });
       const segmentEnd = nextStopIndex === -1 ? keywordIndex + 7 : nextStopIndex;
       const segment = words.slice(keywordIndex + 1, segmentEnd).join(" ");
@@ -432,16 +463,49 @@ function findNodeAfterVoiceKeyword(command, keywords) {
 
 function findNodeInVoiceText(text) {
   const normalizedText = normalizeVoiceComparable(text);
+  const exactMatches = [];
+  const fuzzyMatches = [];
 
-  return state.nodes.find((node) => {
-    return buildVoiceNodeAliases(node).some((alias) => {
+  state.nodes.forEach((node) => {
+    let bestScore = 0;
+
+    buildVoiceNodeAliases(node).forEach((alias) => {
       const normalizedAlias = normalizeVoiceComparable(alias);
-      return normalizedText === normalizedAlias
-        || normalizedText.includes(` ${normalizedAlias} `)
-        || normalizedText.startsWith(`${normalizedAlias} `)
-        || normalizedText.endsWith(` ${normalizedAlias}`);
+
+      if (!normalizedAlias) {
+        return;
+      }
+
+      if (containsVoicePhrase(normalizedText, normalizedAlias)) {
+        bestScore = Math.max(bestScore, 100 + normalizedAlias.length);
+        return;
+      }
+
+      if (normalizedAlias.length >= 5) {
+        const distance = levenshteinDistance(normalizedText, normalizedAlias);
+        const similarity = 1 - (distance / Math.max(normalizedText.length, normalizedAlias.length));
+
+        if (similarity >= 0.78) {
+          bestScore = Math.max(bestScore, similarity * 100);
+        }
+      }
     });
-  })?.id || null;
+
+    if (bestScore >= 100) {
+      exactMatches.push({ id: node.id, score: bestScore });
+    } else if (bestScore > 0) {
+      fuzzyMatches.push({ id: node.id, score: bestScore });
+    }
+  });
+
+  const matches = exactMatches.length ? exactMatches : fuzzyMatches;
+  matches.sort((left, right) => right.score - left.score || naturalCompare(left.id, right.id));
+
+  if (!matches.length || (matches[1] && matches[0].score === matches[1].score)) {
+    return null;
+  }
+
+  return matches[0].id;
 }
 
 function buildVoiceNodeAliases(node) {
@@ -449,6 +513,8 @@ function buildVoiceNodeAliases(node) {
   const match = id.match(/^([a-zA-Z]+)(\d+)$/);
   const aliases = [
     id,
+    id.replace(/[-_]/g, " "),
+    node?.blockName,
     node?.name,
     getNodeAttribute(node, "descricao", "descrição", "description", "label"),
     getNodeAttribute(node, "bloco", "block", "building", "predio", "prédio")
@@ -502,13 +568,94 @@ function normalizeVoiceComparable(value) {
 }
 
 function normalizeVoiceText(value) {
-  return String(value || "")
+  const normalized = String(value || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^\w\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+  return replaceSpokenNumbers(normalized);
+}
+
+function replaceSpokenNumbers(value) {
+  const numberWords = {
+    zero: "0", um: "1", uma: "1", dois: "2", duas: "2", tres: "3", quatro: "4",
+    cinco: "5", seis: "6", sete: "7", oito: "8", nove: "9", dez: "10",
+    onze: "11", doze: "12", treze: "13", quatorze: "14", catorze: "14",
+    quinze: "15", dezesseis: "16", dezassete: "17", dezessete: "17",
+    dezoito: "18", dezenove: "19", vinte: "20"
+  };
+
+  return value.split(" ").map((word) => numberWords[word] || word).join(" ");
+}
+
+function containsVoicePhrase(text, phrase) {
+  return ` ${text} `.includes(` ${phrase} `);
+}
+
+function levenshteinDistance(left, right) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + substitutionCost
+      );
+    }
+
+    previous.splice(0, previous.length, ...current);
+  }
+
+  return previous[right.length];
+}
+
+function selectBestVoiceAlternative(alternatives) {
+  return [...alternatives].sort((left, right) => {
+    const leftScore = scoreVoiceTranscript(left.transcript) + left.confidence * 10;
+    const rightScore = scoreVoiceTranscript(right.transcript) + right.confidence * 10;
+    return rightScore - leftScore;
+  })[0] || null;
+}
+
+function scoreVoiceTranscript(transcript) {
+  const command = normalizeVoiceText(transcript);
+  const keywordCount = ["origem", "destino", "de", "do", "da", "para", "ate", "rota", "bloco", "predio"]
+    .filter((keyword) => containsVoicePhrase(command, keyword)).length;
+  const nodeScore = findNodeInVoiceText(command) ? 30 : 0;
+  return nodeScore + keywordCount * 5;
+}
+
+function updateVoiceRecognitionGrammar() {
+  const SpeechGrammarList = window.SpeechGrammarList || window.webkitSpeechGrammarList;
+
+  if (!state.voiceRecognition || !SpeechGrammarList || !state.nodes.length) {
+    return;
+  }
+
+  const terms = state.nodes
+    .flatMap(buildVoiceNodeAliases)
+    .map(normalizeVoiceText)
+    .filter((term) => term && term.length <= 60)
+    .slice(0, 400);
+
+  if (!terms.length) {
+    return;
+  }
+
+  try {
+    const grammarList = new SpeechGrammarList();
+    grammarList.addFromString(`#JSGF V1.0; grammar locais; public <local> = ${terms.join(" | ")} ;`, 1);
+    state.voiceRecognition.grammars = grammarList;
+  } catch (error) {
+    console.warn("O navegador ignorou a lista de locais para reconhecimento de voz.", error);
+  }
 }
 
 function initializeMapboxMap() {
@@ -868,6 +1015,8 @@ function loadGraph(rawData) {
   state.graphReady = nodes.length > 0;
   state.selectedBuildingId = getBuildingCandidates()[0]?.item.id || null;
 
+  updateVoiceRecognitionGrammar();
+
   refs.nodeCount.textContent = String(nodes.length);
   refs.edgeCount.textContent = String(segments.length);
   renderBuildingAdminControls();
@@ -881,7 +1030,7 @@ function normalizeNodes(rawNodes) {
     const id = String(item?.id || "").trim();
     const position = normalizePoint(item?.position);
 
-    if (!id || !position || nodesById.has(id)) {
+    if (!id || !position || nodesById.has(id) || (position.x === 0 && position.y === 0)) {
       return;
     }
 
@@ -890,7 +1039,7 @@ function normalizeNodes(rawNodes) {
       accessible: Boolean(item.accessible),
       attributes: item.attributes && typeof item.attributes === "object" ? item.attributes : {},
       blockName: String(item.blockName || "").trim(),
-      category: normalizeNodeCategory(item.category, item.type),
+      category: normalizeNodeCategory(item.category, item.type, item.blockName, item.layer),
       flow: String(item.flow || "").trim(),
       layer: String(item.layer || "").trim(),
       level: String(item.level || getNodeAttribute(item, "nivel", "level", "floor", "pavimento") || "").trim(),
@@ -2415,7 +2564,25 @@ function setStatus(text, tone = "info") {
   refs.statusText.dataset.tone = tone;
 }
 
-function normalizeNodeCategory(category, type = "") {
+function normalizeNodeCategory(category, type = "", blockName = "", layer = "") {
+  const structuralSource = normalizeVoiceText(`${blockName} ${layer}`).replace(/\s+/g, "_");
+  const structuralCategories = [
+    ["crosswalk", ["crosswalk", "travessia", "atravessia", "faixa"]],
+    ["intersection", ["intersection", "intersecao", "cruzamento"]],
+    ["accessible_entrance", ["accessible_entrance", "entrada_acessivel"]],
+    ["elevator", ["elevator", "elevador"]],
+    ["restroom", ["restroom", "banheiro"]],
+    ["door", ["door", "porta"]],
+    ["entrance", ["entrance", "entrada"]],
+    ["ramp", ["ramp", "rampa"]]
+  ];
+
+  for (const [normalizedCategory, keywords] of structuralCategories) {
+    if (keywords.some((keyword) => structuralSource.includes(keyword))) {
+      return normalizedCategory;
+    }
+  }
+
   const normalized = normalizeVoiceText(category || type || "node").replace(/\s+/g, "_");
   const typeNormalized = normalizeVoiceText(type || "").replace(/\s+/g, "_");
   const candidate = normalized === "node" && typeNormalized ? typeNormalized : normalized;
