@@ -26,23 +26,30 @@
       </header>
 
       <div class="navigator-card" id="navigatorCard">
+        <div class="navigator-card__header">
+          <h2>Navegação</h2>
+          <button type="button" id="voicePanelToggleBtn" class="icon-button" aria-expanded="false" aria-controls="voicePanel" title="Busca por voz">
+            <i data-lucide="mic" aria-hidden="true"></i>
+            <span class="sr-only">Busca por voz</span>
+          </button>
+        </div>
         <form class="route-form" id="routeForm">
-          <label class="field" for="originSelect">
+          <label class="field route-field route-field--origin" for="originSelect">
             <span>Saindo de</span>
             <select id="originSelect" name="origin"></select>
           </label>
 
-          <button type="button" id="swapBtn" class="swap-route-btn" aria-label="Inverter origem e destino">Trocar</button>
+          <button type="button" id="swapBtn" class="swap-route-btn" aria-label="Inverter origem e destino"><i data-lucide="arrow-up-down" aria-hidden="true"></i></button>
 
-          <label class="field" for="destinationSelect">
+          <label class="field route-field route-field--destination" for="destinationSelect">
             <span>Indo para</span>
             <select id="destinationSelect" name="destination"></select>
           </label>
 
-          <button type="submit" class="primary route-action">Traçar rota</button>
+          <button type="submit" class="primary route-action"><i data-lucide="navigation" aria-hidden="true"></i>Traçar rota</button>
         </form>
 
-        <section class="voice-panel" aria-label="Comando de voz para os pontos">
+        <section class="voice-panel" id="voicePanel" aria-label="Comando de voz para os pontos" hidden>
           <form id="voiceCommandForm" class="voice-command-form">
             <label class="field" for="voiceCommandInput">
               <span>Buscar por voz ou texto</span>
@@ -56,14 +63,26 @@
 
         <section class="result-panel" aria-live="polite">
           <div class="route-output route-summary">
-            <span>Rota acessivel</span>
+            <span>Distância</span>
             <strong id="routeDistance">-</strong>
           </div>
 
-          <div class="route-output">
+          <div class="route-output route-summary">
+            <span>Tempo estimado</span>
+            <strong id="routeDuration">-</strong>
+          </div>
+
+          <div class="route-output route-path-summary">
             <span>Caminho</span>
             <strong id="pathText">Escolha origem e destino.</strong>
           </div>
+
+          <div class="accessibility-note">
+            <i data-lucide="accessibility" aria-hidden="true"></i>
+            <p><strong>Rota com prioridade acessível</strong><span>Escadas e trechos inadequados recebem penalidade. Confirme as condições em campo.</span></p>
+          </div>
+
+          <button type="button" id="clearRouteBtn" class="clear-route-btn">Limpar rota</button>
         </section>
       </div>
 
@@ -159,6 +178,7 @@
 
   <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

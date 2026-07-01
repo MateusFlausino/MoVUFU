@@ -8,8 +8,7 @@ const OSM_CAMPUS_BOUNDARY_ID = 804592441;
 const OSM_CAMPUS_BBOX = [-18.92084, -48.26232, -18.91589, -48.25386];
 const OSM_LIVE_TIMEOUT_MS = 20000;
 const OSM_ROUTABLE_HIGHWAYS = new Set([
-  "footway", "path", "pedestrian", "steps", "living_street",
-  "residential", "service", "unclassified", "track"
+  "footway", "path"
 ]);
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DUPLICATE_POINT_EPSILON = 0.000001;
@@ -82,6 +81,7 @@ document.addEventListener("DOMContentLoaded", initializeApp);
 async function initializeApp() {
   cacheDom();
   bindEvents();
+  window.lucide?.createIcons();
   initializeMapboxMap();
   await initializeOsmMap();
 }
@@ -174,6 +174,7 @@ function cacheDom() {
   refs.installAppBtn = document.getElementById("installAppBtn");
   refs.navigatorCard = document.getElementById("navigatorCard");
   refs.voiceCommandForm = document.getElementById("voiceCommandForm");
+  refs.voicePanelToggleBtn = document.getElementById("voicePanelToggleBtn");
   refs.voiceCommandInput = document.getElementById("voiceCommandInput");
   refs.voiceBtn = document.getElementById("voiceBtn");
   refs.voicePanel = document.querySelector(".voice-panel");
@@ -191,6 +192,8 @@ function cacheDom() {
   refs.nodeCount = document.getElementById("nodeCount");
   refs.edgeCount = document.getElementById("edgeCount");
   refs.routeDistance = document.getElementById("routeDistance");
+  refs.routeDuration = document.getElementById("routeDuration");
+  refs.clearRouteBtn = document.getElementById("clearRouteBtn");
   refs.pathText = document.getElementById("pathText");
   refs.segmentList = document.getElementById("segmentList");
   refs.nodeList = document.getElementById("nodeList");
@@ -238,6 +241,8 @@ function bindEvents() {
   refs.mapboxViewBtn.addEventListener("click", activateMapboxView);
   refs.osmViewBtn.addEventListener("click", () => setViewMode("osm"));
   refs.voiceBtn.addEventListener("click", toggleVoiceRecognition);
+  refs.voicePanelToggleBtn.addEventListener("click", toggleVoicePanel);
+  refs.clearRouteBtn.addEventListener("click", () => clearOsmRoute("Escolha uma nova origem e destino."));
   refs.voiceCommandForm.addEventListener("submit", handleManualVoiceCommand);
 
   refs.svg.addEventListener("wheel", handleMapWheel, { passive: false });
@@ -253,6 +258,16 @@ function bindEvents() {
   initializeVoiceRecognition();
   registerServiceWorker();
   prepareInstallHint();
+}
+
+function toggleVoicePanel() {
+  const willOpen = refs.voicePanel.hidden;
+  refs.voicePanel.hidden = !willOpen;
+  refs.voicePanelToggleBtn.setAttribute("aria-expanded", String(willOpen));
+  refs.voicePanelToggleBtn.classList.toggle("is-active", willOpen);
+  if (willOpen) {
+    refs.voiceCommandInput.focus();
+  }
 }
 
 function initializeVoiceRecognition() {
@@ -937,7 +952,7 @@ async function fetchLiveOsmGeoJson() {
   const bbox = `${south},${west},${north},${east}`;
   const query = `[out:json][timeout:18];(
     way(${OSM_CAMPUS_BOUNDARY_ID});
-    way["highway"~"^(footway|path|pedestrian|steps|living_street|residential|service|unclassified|track)$"](${bbox});
+    way["highway"~"^(footway|path)$"](${bbox});
     node["highway"="crossing"](${bbox});
     node["kerb"~"^(lowered|flush)$"](${bbox});
     node["wheelchair"](${bbox});
@@ -1288,7 +1303,9 @@ function calculateAndRenderOsmRoute() {
   updateMapboxOsmRoute(route.nodeKeys);
   state.route = route;
   refs.navigatorCard.classList.add("has-route");
+  document.querySelector(".map-panel")?.classList.add("has-route");
   refs.routeDistance.textContent = `${roundNumber(route.distance, 1).toLocaleString("pt-BR")} m`;
+  refs.routeDuration.textContent = `${Math.max(1, Math.ceil(route.distance / 66))} min`;
   refs.pathText.textContent = `${origin.name} → ${destination.name}`;
   state.osmMap.fitBounds(line.getBounds(), { padding: [70, 70] });
   setStatus(`Rota OpenStreetMap calculada de ${origin.name} para ${destination.name}.`, "success");
@@ -1334,7 +1351,9 @@ function clearOsmRoute(message) {
   updateMapboxOsmRoute();
   state.route = null;
   refs.navigatorCard.classList.remove("has-route");
+  document.querySelector(".map-panel")?.classList.remove("has-route");
   refs.routeDistance.textContent = "-";
+  refs.routeDuration.textContent = "-";
   refs.pathText.textContent = message;
   setStatus(message, "warning");
 }

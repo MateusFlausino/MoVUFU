@@ -16,8 +16,7 @@ OSM_MAP_URL = (
     f"?bbox={BBOX[0]},{BBOX[1]},{BBOX[2]},{BBOX[3]}"
 )
 PEDESTRIAN_HIGHWAYS = {
-    "footway", "path", "pedestrian", "steps", "living_street",
-    "residential", "service", "unclassified", "track",
+    "footway", "path",
 }
 ACCESSIBLE_KERBS = {"lowered", "flush"}
 OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "osm-santa-monica-accessibility.geojson"
