@@ -10,12 +10,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-BBOX = (-48.264, -18.925, -48.252, -18.914)  # oeste, sul, leste, norte
+BBOX = (-48.271, -18.932, -48.245, -18.907)  # oeste, sul, leste, norte
 OSM_MAP_URL = (
     "https://api.openstreetmap.org/api/0.6/map"
     f"?bbox={BBOX[0]},{BBOX[1]},{BBOX[2]},{BBOX[3]}"
 )
-PEDESTRIAN_HIGHWAYS = {"footway", "path", "pedestrian", "steps"}
+PEDESTRIAN_HIGHWAYS = {
+    "footway", "path", "pedestrian", "steps", "living_street",
+    "residential", "service", "unclassified", "track",
+}
 ACCESSIBLE_KERBS = {"lowered", "flush"}
 OUTPUT_PATH = Path(__file__).resolve().parents[1] / "data" / "osm-santa-monica-accessibility.geojson"
 
@@ -77,6 +80,38 @@ def is_accessibility_node(node_tags: dict[str, str]) -> bool:
     )
 
 
+def is_routable_way(way_tags: dict[str, str]) -> bool:
+    return (
+        way_tags.get("highway") in PEDESTRIAN_HIGHWAYS
+        and way_tags.get("foot") not in {"no", "use_sidepath"}
+        and way_tags.get("access") != "no"
+    )
+
+
+def point_in_bbox(point: tuple[float, float]) -> bool:
+    longitude, latitude = point
+    west, south, east, north = BBOX
+    return west <= longitude <= east and south <= latitude <= north
+
+
+def is_destination(tags_map: dict[str, str]) -> bool:
+    return bool(tags_map.get("name") or tags_map.get("ref")) and bool(
+        tags_map.get("building")
+        or tags_map.get("amenity")
+        or tags_map.get("entrance")
+        or tags_map.get("office")
+        or tags_map.get("leisure")
+    )
+
+
+def polygon_centroid(coordinates: list[tuple[float, float]]) -> tuple[float, float]:
+    points = coordinates[:-1] if coordinates[0] == coordinates[-1] else coordinates
+    return (
+        sum(point[0] for point in points) / len(points),
+        sum(point[1] for point in points) / len(points),
+    )
+
+
 def download_osm() -> bytes:
     request = urllib.request.Request(
         OSM_MAP_URL,
@@ -94,14 +129,15 @@ def build_geojson(osm_xml: bytes) -> dict:
         node.attrib["id"]: (float(node.attrib["lon"]), float(node.attrib["lat"]))
         for node in node_elements
     }
-    campus_boundary = find_campus_boundary(ways, nodes)
     features = []
     pathway_count = 0
     point_count = 0
+    destination_count = 0
+    destination_keys: set[tuple[str, str]] = set()
 
     for way in ways:
         way_tags = tags(way)
-        if way_tags.get("highway") not in PEDESTRIAN_HIGHWAYS:
+        if not is_routable_way(way_tags):
             continue
         coordinates = [
             nodes[nd.attrib["ref"]]
@@ -109,7 +145,7 @@ def build_geojson(osm_xml: bytes) -> dict:
             if nd.attrib["ref"] in nodes
         ]
         if len(coordinates) < 2 or not any(
-            point_in_polygon(coordinate, campus_boundary) for coordinate in coordinates
+            point_in_bbox(coordinate) for coordinate in coordinates
         ):
             continue
         features.append(
@@ -129,7 +165,8 @@ def build_geojson(osm_xml: bytes) -> dict:
     for node in node_elements:
         node_tags = tags(node)
         coordinate = nodes[node.attrib["id"]]
-        if not is_accessibility_node(node_tags) or not point_in_polygon(coordinate, campus_boundary):
+        is_entrance = "entrance" in node_tags
+        if (not is_accessibility_node(node_tags) and not is_entrance) or not point_in_bbox(coordinate):
             continue
         features.append(
             {
@@ -137,13 +174,73 @@ def build_geojson(osm_xml: bytes) -> dict:
                 "id": f"node/{node.attrib['id']}",
                 "properties": {
                     "osm_id": node.attrib["id"],
-                    "feature_class": "accessibility_point",
+                    "feature_class": "entrance_point" if is_entrance else "accessibility_point",
+                    "label": node_tags.get("name") or node_tags.get("ref") or "Entrada/saida do bloco",
                     **node_tags,
                 },
                 "geometry": {"type": "Point", "coordinates": coordinate},
             }
         )
         point_count += 1
+
+    for way in ways:
+        way_tags = tags(way)
+        if not is_destination(way_tags):
+            continue
+        coordinates = [
+            nodes[nd.attrib["ref"]]
+            for nd in way.findall("nd")
+            if nd.attrib["ref"] in nodes
+        ]
+        if len(coordinates) < 3:
+            continue
+        coordinate = polygon_centroid(coordinates)
+        if not point_in_bbox(coordinate):
+            continue
+        label = way_tags.get("ref") or way_tags.get("name") or way.attrib["id"]
+        key = (label.casefold(), way_tags.get("name", "").casefold())
+        if key in destination_keys:
+            continue
+        destination_keys.add(key)
+        features.append(
+            {
+                "type": "Feature",
+                "id": f"destination/way/{way.attrib['id']}",
+                "properties": {
+                    "osm_id": way.attrib["id"],
+                    "feature_class": "destination",
+                    "label": label,
+                    **way_tags,
+                },
+                "geometry": {"type": "Point", "coordinates": coordinate},
+            }
+        )
+        destination_count += 1
+
+    for node in node_elements:
+        node_tags = tags(node)
+        coordinate = nodes[node.attrib["id"]]
+        if not is_destination(node_tags) or not point_in_bbox(coordinate):
+            continue
+        label = node_tags.get("ref") or node_tags.get("name") or node.attrib["id"]
+        key = (label.casefold(), node_tags.get("name", "").casefold())
+        if key in destination_keys:
+            continue
+        destination_keys.add(key)
+        features.append(
+            {
+                "type": "Feature",
+                "id": f"destination/node/{node.attrib['id']}",
+                "properties": {
+                    "osm_id": node.attrib["id"],
+                    "feature_class": "destination",
+                    "label": label,
+                    **node_tags,
+                },
+                "geometry": {"type": "Point", "coordinates": coordinate},
+            }
+        )
+        destination_count += 1
 
     return {
         "type": "FeatureCollection",
@@ -156,6 +253,7 @@ def build_geojson(osm_xml: bytes) -> dict:
             "bbox": list(BBOX),
             "pedestrian_path_count": pathway_count,
             "accessibility_point_count": point_count,
+            "destination_count": destination_count,
             "warning": "Dados colaborativos; validar rampas e condicoes de acessibilidade em campo.",
         },
         "features": features,
@@ -177,6 +275,7 @@ def main() -> int:
     print(f"Arquivo: {OUTPUT_PATH}")
     print(f"Caminhos de pedestres: {metadata['pedestrian_path_count']}")
     print(f"Pontos de acessibilidade: {metadata['accessibility_point_count']}")
+    print(f"Destinos nomeados: {metadata['destination_count']}")
     return 0
 
 

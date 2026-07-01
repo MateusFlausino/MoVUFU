@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Roteador da Planta UFU</title>
+  <title>MoV UFU - Rotas OpenStreetMap</title>
   <meta name="theme-color" content="#007aff">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="MoV UFU">
@@ -123,23 +123,23 @@
         </section>
       </div>
 
-      <p class="status" id="statusText">Carregando planta...</p>
+      <p class="status" id="statusText">Carregando dados OpenStreetMap...</p>
     </section>
 
-    <section class="map-panel" aria-label="Mapa da planta baixa">
+    <section class="map-panel" aria-label="OpenStreetMap do Campus Santa Monica">
       <div class="view-switch" role="group" aria-label="Tipo de mapa">
-        <button type="button" id="svgViewBtn" class="is-active">Planta UFU</button>
-        <button type="button" id="osmViewBtn">OpenStreetMap</button>
-        <button type="button" id="mapboxViewBtn">Mapa 3D</button>
+        <button type="button" id="svgViewBtn" hidden>Planta UFU</button>
+        <button type="button" id="osmViewBtn" class="is-active">OpenStreetMap</button>
+        <button type="button" id="mapboxViewBtn">Mapbox 3D</button>
       </div>
 
-      <div class="map-toolbar">
+      <div class="map-toolbar is-hidden">
         <button type="button" id="zoomInBtn" aria-label="Aproximar">+</button>
         <button type="button" id="zoomOutBtn" aria-label="Afastar">-</button>
         <button type="button" id="resetViewBtn">100%</button>
       </div>
 
-      <svg id="campusMap" class="campus-map" role="img" aria-label="Planta baixa com rota calculada">
+      <svg id="campusMap" class="campus-map is-hidden" role="img" aria-label="Planta baixa desativada">
         <defs>
           <filter id="routeGlow" x="-40%" y="-40%" width="180%" height="180%">
             <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#f59e0b" flood-opacity="0.65"/>
@@ -153,7 +153,7 @@
       </svg>
 
       <div id="mapboxMap" class="mapbox-map" aria-label="Mapa 3D do Campus Santa Monica"></div>
-      <div id="osmMap" class="osm-map" aria-label="OpenStreetMap com caminhos de pedestres e travessias do Campus Santa Monica"></div>
+      <div id="osmMap" class="osm-map is-active" aria-label="OpenStreetMap com caminhos de pedestres e travessias do Campus Santa Monica"></div>
     </section>
   </main>
 

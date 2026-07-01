@@ -1,13 +1,11 @@
-const CACHE_NAME = "movufu-v3";
+const CACHE_NAME = "movufu-v8";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/style.css",
   "/app.js",
   "/manifest.json",
-  "/data/dwg-map-raw.json",
   "/data/osm-santa-monica-accessibility.geojson",
-  "/campus_santa_monica.pdf",
   "/assets/icon-192.png",
   "/assets/icon-512.png"
 ];
@@ -34,6 +32,12 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") {
+    return;
+  }
+
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.origin !== self.location.origin) {
+    event.respondWith(fetch(event.request));
     return;
   }
 

@@ -461,7 +461,7 @@ input[type="text"] {
   left: 50%;
   transform: translateX(-50%);
   display: inline-grid;
-  grid-template-columns: repeat(3, minmax(112px, auto));
+  grid-template-columns: minmax(150px, auto);
   gap: 6px;
   padding: 5px;
   border: 1px solid var(--line);
@@ -487,6 +487,10 @@ input[type="text"] {
 .view-switch button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.view-switch button[hidden] {
+  display: none;
 }
 
 .map-toolbar button {
@@ -839,7 +843,7 @@ input[type="text"] {
   .button-row,
   .voice-command-form,
   .pick-panel {
-    grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .route-form {
@@ -847,7 +851,7 @@ input[type="text"] {
   }
 
   .metric-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(150px, 1fr);
     gap: 6px;
   }
 

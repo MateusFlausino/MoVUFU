@@ -1,9 +1,19 @@
 const DATA_URL = "data/dwg-map-raw.json";
 const OSM_ACCESSIBILITY_URL = "data/osm-santa-monica-accessibility.geojson";
+const OSM_OVERPASS_URLS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter"
+];
+const OSM_CAMPUS_BBOX = [-18.932, -48.271, -18.907, -48.245];
+const OSM_LIVE_TIMEOUT_MS = 20000;
+const OSM_ROUTABLE_HIGHWAYS = new Set([
+  "footway", "path", "pedestrian", "steps", "living_street",
+  "residential", "service", "unclassified", "track"
+]);
 const SVG_NS = "http://www.w3.org/2000/svg";
 const DUPLICATE_POINT_EPSILON = 0.000001;
 const MILLIMETERS_PER_METER = 1000;
-const MAPBOX_ACCESS_TOKEN = window.MOVUFU_MAPBOX_TOKEN || "";
+let MAPBOX_ACCESS_TOKEN = window.MOVUFU_MAPBOX_TOKEN || window.localStorage?.getItem("movufu-mapbox-token") || "";
 const MAPBOX_STYLE_URL = "mapbox://styles/emauburiti/cmb8mw0oh015401qy4kri8jnm";
 const MAPBOX_UBERLANDIA_BOUNDS = [
   [-48.30, -19.00],
@@ -41,8 +51,13 @@ const state = {
   nodes: [],
   nodeById: new Map(),
   osmAccessibilityLayer: null,
+  osmAdjacency: new Map(),
+  osmDestinations: [],
+  osmGeoJson: null,
+  osmGraphNodes: new Map(),
   osmMap: null,
   osmReady: false,
+  osmRouteLayer: null,
   pickTarget: "origin",
   rawData: null,
   rawRouteBounds: null,
@@ -55,7 +70,7 @@ const state = {
   voiceSpeechDetected: false,
   voiceRecognition: null,
   voiceStopTimer: null,
-  viewMode: "svg",
+  viewMode: "osm",
   viewBox: null
 };
 
@@ -67,8 +82,7 @@ async function initializeApp() {
   cacheDom();
   bindEvents();
   initializeMapboxMap();
-  initializeOsmMap();
-  await loadCurrentMapData();
+  await initializeOsmMap();
 }
 
 async function loadCurrentMapData(statusText = "Carregando planta...") {
@@ -220,7 +234,7 @@ function bindEvents() {
   refs.zoomOutBtn.addEventListener("click", () => zoomView(1.18));
   refs.resetViewBtn.addEventListener("click", resetView);
   refs.svgViewBtn.addEventListener("click", () => setViewMode("svg"));
-  refs.mapboxViewBtn.addEventListener("click", () => setViewMode("mapbox"));
+  refs.mapboxViewBtn.addEventListener("click", activateMapboxView);
   refs.osmViewBtn.addEventListener("click", () => setViewMode("osm"));
   refs.voiceBtn.addEventListener("click", toggleVoiceRecognition);
   refs.voiceCommandForm.addEventListener("submit", handleManualVoiceCommand);
@@ -667,18 +681,24 @@ function updateVoiceRecognitionGrammar() {
 }
 
 function initializeMapboxMap() {
+  if (state.threeDMap) {
+    return true;
+  }
+
   if (!refs.mapboxMap || !window.mapboxgl) {
     refs.mapboxViewBtn.disabled = true;
     refs.mapboxViewBtn.title = "Mapbox GL JS nao foi carregado.";
-    return;
+    return false;
   }
 
   if (!MAPBOX_ACCESS_TOKEN) {
-    refs.mapboxViewBtn.disabled = true;
-    refs.mapboxViewBtn.title = "Configure window.MOVUFU_MAPBOX_TOKEN para ativar o mapa 3D.";
-    return;
+    refs.mapboxViewBtn.disabled = false;
+    refs.mapboxViewBtn.title = "Clique para informar o token publico do Mapbox.";
+    return false;
   }
 
+  refs.mapboxViewBtn.disabled = false;
+  refs.mapboxViewBtn.title = "Abrir visualizacao Mapbox 3D";
   mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
   state.threeDMap = new mapboxgl.Map({
     container: refs.mapboxMap,
@@ -699,15 +719,38 @@ function initializeMapboxMap() {
     state.mapboxReady = true;
     addMapboxBaseControls();
     addMapboxAccessibilityLayers();
-    updateMapboxAccessibilityData();
+    updateMapboxOsmData();
   });
+  state.threeDMap.on("error", (event) => {
+    if (event?.error) {
+      console.warn("Mapbox informou um erro.", event.error);
+    }
+  });
+  return true;
+}
+
+function activateMapboxView() {
+  if (!MAPBOX_ACCESS_TOKEN) {
+    const token = window.prompt("Cole seu token publico do Mapbox (iniciado por pk.):", "");
+    if (!token) {
+      setStatus("O Mapbox precisa de um token publico para abrir o mapa 3D.", "info");
+      return;
+    }
+    MAPBOX_ACCESS_TOKEN = token.trim();
+    window.localStorage?.setItem("movufu-mapbox-token", MAPBOX_ACCESS_TOKEN);
+  }
+
+  if (initializeMapboxMap()) {
+    setViewMode("mapbox");
+    setStatus("Visualizacao Mapbox 3D ativada. As rotas continuam usando os dados atuais do OpenStreetMap.", "success");
+  }
 }
 
 function initializeOsmMap() {
   if (!refs.osmMap || !window.L) {
     refs.osmViewBtn.disabled = true;
     refs.osmViewBtn.title = "OpenStreetMap nao foi carregado.";
-    return;
+    return Promise.resolve();
   }
 
   const map = L.map(refs.osmMap, {
@@ -735,17 +778,16 @@ function initializeOsmMap() {
   legend.addTo(map);
 
   state.osmMap = map;
-  loadOsmAccessibilityLayer();
+  return loadOsmAccessibilityLayer();
 }
 
 async function loadOsmAccessibilityLayer() {
   try {
-    const response = await fetch(`${OSM_ACCESSIBILITY_URL}?v=${Date.now()}`, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error("dados OSM indisponiveis");
-    }
-
-    const geoJson = await response.json();
+    setStatus("Consultando a versao mais recente do OpenStreetMap...");
+    const { geoJson, source } = await fetchCurrentOsmGeoJson();
+    state.osmGeoJson = geoJson;
+    loadOsmRoutingGraph(geoJson);
+    updateMapboxOsmData();
     const layer = L.geoJSON(geoJson, {
       style(feature) {
         const isSteps = feature?.properties?.highway === "steps";
@@ -760,9 +802,10 @@ async function loadOsmAccessibilityLayer() {
         };
       },
       pointToLayer(feature, latlng) {
+        const isDestination = feature?.properties?.feature_class === "destination";
         return L.circleMarker(latlng, {
-          radius: 7,
-          fillColor: "#f97316",
+          radius: isDestination ? 5 : 7,
+          fillColor: isDestination ? "#2563eb" : "#f97316",
           fillOpacity: 0.95,
           color: "#ffffff",
           opacity: 1,
@@ -771,7 +814,17 @@ async function loadOsmAccessibilityLayer() {
       },
       onEachFeature(feature, featureLayer) {
         const properties = feature?.properties || {};
-        if (feature?.geometry?.type === "Point") {
+        if (properties.feature_class === "destination") {
+          featureLayer.bindTooltip(properties.label || properties.name || "Destino", {
+            direction: "top",
+            opacity: 0.9
+          });
+        } else if (properties.feature_class === "entrance_point") {
+          featureLayer.bindTooltip(properties.label || "Entrada/saida do bloco", {
+            direction: "top",
+            opacity: 0.9
+          });
+        } else if (feature?.geometry?.type === "Point") {
           featureLayer.bindPopup([
             "<strong>Travessia mapeada</strong>",
             properties.crossing ? `<br>Tipo: ${properties.crossing}` : "",
@@ -784,6 +837,14 @@ async function loadOsmAccessibilityLayer() {
 
     state.osmAccessibilityLayer = layer;
     state.osmReady = true;
+    setViewMode("osm");
+    calculateAndRenderRoute();
+    const metadata = geoJson.metadata || {};
+    const sourceLabel = source === "live" ? "dados atuais" : "copia local de contingencia";
+    setStatus(
+      `OpenStreetMap (${sourceLabel}): ${metadata.pedestrian_path_count || 0} caminhos, ${metadata.accessibility_point_count || 0} travessias e ${state.osmDestinations.length} destinos conectados.`,
+      source === "live" ? "success" : "info"
+    );
     if (layer.getBounds().isValid()) {
       state.osmMap.fitBounds(layer.getBounds(), { padding: [28, 28] });
     }
@@ -792,6 +853,437 @@ async function loadOsmAccessibilityLayer() {
     refs.osmViewBtn.disabled = true;
     refs.osmViewBtn.title = "Caminhos OpenStreetMap indisponiveis.";
   }
+}
+
+async function fetchCurrentOsmGeoJson() {
+  try {
+    return { geoJson: await fetchLiveOsmGeoJson(), source: "live" };
+  } catch (liveError) {
+    console.warn("Consulta OSM ao vivo falhou; usando copia local.", liveError);
+    const response = await fetch(`${OSM_ACCESSIBILITY_URL}?v=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error("dados atuais e copia local do OSM indisponiveis");
+    }
+    return { geoJson: await response.json(), source: "fallback" };
+  }
+}
+
+async function fetchLiveOsmGeoJson() {
+  const [south, west, north, east] = OSM_CAMPUS_BBOX;
+  const bbox = `${south},${west},${north},${east}`;
+  const query = `[out:json][timeout:18];(
+    way["highway"~"^(footway|path|pedestrian|steps|living_street|residential|service|unclassified|track)$"](${bbox});
+    node["highway"="crossing"](${bbox});
+    node["kerb"~"^(lowered|flush)$"](${bbox});
+    node["wheelchair"](${bbox});
+    node["tactile_paving"](${bbox});
+    node["entrance"](${bbox});
+    nwr["name"]["building"](${bbox}); nwr["ref"]["building"](${bbox});
+    nwr["name"]["amenity"](${bbox}); nwr["ref"]["amenity"](${bbox});
+    nwr["name"]["entrance"](${bbox}); nwr["ref"]["entrance"](${bbox});
+    nwr["name"]["office"](${bbox}); nwr["ref"]["office"](${bbox});
+    nwr["name"]["leisure"](${bbox}); nwr["ref"]["leisure"](${bbox});
+  );out tags center geom;`;
+  const errors = [];
+  for (const endpoint of OSM_OVERPASS_URLS) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), OSM_LIVE_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${endpoint}?data=${encodeURIComponent(query)}`, {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        throw new Error(`resposta ${response.status}`);
+      }
+      return overpassToGeoJson(await response.json());
+    } catch (error) {
+      errors.push(`${endpoint}: ${error.message}`);
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+  throw new Error(`Servicos Overpass indisponiveis. ${errors.join(" | ")}`);
+}
+
+function overpassToGeoJson(data) {
+  const features = [];
+  const destinationKeys = new Set();
+  let pathwayCount = 0;
+  let accessibilityPointCount = 0;
+  let destinationCount = 0;
+
+  (data.elements || []).forEach((element) => {
+    const properties = element.tags || {};
+    const id = `${element.type}/${element.id}`;
+    if (element.type === "way" && isOsmRoutableWay(properties)) {
+      const coordinates = (element.geometry || []).map((point) => [point.lon, point.lat]);
+      if (coordinates.length >= 2) {
+        features.push({ type: "Feature", id, properties: { osm_id: element.id, feature_class: "pedestrian_path", ...properties }, geometry: { type: "LineString", coordinates } });
+        pathwayCount += 1;
+      }
+      return;
+    }
+
+    const coordinate = element.type === "node"
+      ? [element.lon, element.lat]
+      : element.center ? [element.center.lon, element.center.lat] : null;
+    if (!coordinate || coordinate.some((value) => !Number.isFinite(value))) {
+      return;
+    }
+
+    const isAccessibilityPoint = element.type === "node" && (
+      properties.highway === "crossing" || /^(lowered|flush)$/.test(properties.kerb || "") ||
+      Object.hasOwn(properties, "wheelchair") || Object.hasOwn(properties, "tactile_paving")
+    );
+    if (isAccessibilityPoint) {
+      features.push({ type: "Feature", id, properties: { osm_id: element.id, feature_class: "accessibility_point", ...properties }, geometry: { type: "Point", coordinates: coordinate } });
+      accessibilityPointCount += 1;
+    }
+
+    if (element.type === "node" && Object.hasOwn(properties, "entrance")) {
+      features.push({
+        type: "Feature",
+        id: `entrance/${id}`,
+        properties: {
+          osm_id: element.id,
+          feature_class: "entrance_point",
+          label: properties.name || properties.ref || "Entrada/saida do bloco",
+          ...properties
+        },
+        geometry: { type: "Point", coordinates: coordinate }
+      });
+    }
+
+    const isDestination = Boolean(properties.name || properties.ref) && Boolean(
+      properties.building || properties.amenity || properties.entrance || properties.office || properties.leisure
+    );
+    if (isDestination) {
+      const label = properties.ref || properties.name || String(element.id);
+      const key = `${label.toLocaleLowerCase("pt-BR")}|${(properties.name || "").toLocaleLowerCase("pt-BR")}`;
+      if (!destinationKeys.has(key)) {
+        destinationKeys.add(key);
+        features.push({ type: "Feature", id: `destination/${id}`, properties: { osm_id: element.id, feature_class: "destination", label, ...properties }, geometry: { type: "Point", coordinates: coordinate } });
+        destinationCount += 1;
+      }
+    }
+  });
+
+  return {
+    type: "FeatureCollection",
+    name: "UFU Campus Santa Monica - OpenStreetMap ao vivo",
+    metadata: {
+      source: "OpenStreetMap contributors via Overpass API",
+      source_url: "https://www.openstreetmap.org/copyright",
+      retrieved_at: new Date().toISOString(),
+      pedestrian_path_count: pathwayCount,
+      accessibility_point_count: accessibilityPointCount,
+      destination_count: destinationCount,
+      warning: "Dados colaborativos; validar rampas e condicoes de acessibilidade em campo."
+    },
+    features
+  };
+}
+
+function isOsmRoutableWay(properties = {}) {
+  if (!OSM_ROUTABLE_HIGHWAYS.has(properties.highway)) {
+    return false;
+  }
+  if (properties.foot === "no" || properties.foot === "use_sidepath" || properties.access === "no") {
+    return false;
+  }
+  return true;
+}
+
+function loadOsmRoutingGraph(geoJson) {
+  const graphNodes = new Map();
+  const adjacency = new Map();
+  let edgeCount = 0;
+
+  (geoJson.features || []).forEach((feature) => {
+    if (feature?.properties?.feature_class !== "pedestrian_path" || feature?.geometry?.type !== "LineString") {
+      return;
+    }
+
+    const coordinates = feature.geometry.coordinates || [];
+    coordinates.forEach((coordinate) => {
+      const key = osmCoordinateKey(coordinate);
+      graphNodes.set(key, coordinate);
+      if (!adjacency.has(key)) {
+        adjacency.set(key, []);
+      }
+    });
+
+    for (let index = 1; index < coordinates.length; index += 1) {
+      const fromCoordinate = coordinates[index - 1];
+      const toCoordinate = coordinates[index];
+      const from = osmCoordinateKey(fromCoordinate);
+      const to = osmCoordinateKey(toCoordinate);
+      const distance = haversineDistance(fromCoordinate, toCoordinate);
+      const properties = feature.properties || {};
+      const accessibilityPenalty = getOsmAccessibilityPenalty(properties);
+      const weight = distance * accessibilityPenalty;
+
+      adjacency.get(from)?.push({ from, to, distance, weight, properties });
+      adjacency.get(to)?.push({ from: to, to: from, distance, weight, properties });
+      edgeCount += 1;
+    }
+  });
+
+  const routingGraphNodes = graphNodes;
+  const routingAdjacency = adjacency;
+  const entranceCoordinates = (geoJson.features || [])
+    .filter((feature) => feature?.properties?.feature_class === "entrance_point" && feature?.geometry?.type === "Point")
+    .map((feature) => feature.geometry.coordinates);
+  const destinations = (geoJson.features || [])
+    .filter((feature) => feature?.properties?.feature_class === "destination" && feature?.geometry?.type === "Point")
+    .map((feature, index) => {
+      const coordinate = feature.geometry.coordinates;
+      const nearestEntrance = findNearestOsmEntrance(coordinate, entranceCoordinates);
+      const graphNodeKey = findNearestOsmGraphNode(nearestEntrance || coordinate, graphNodes);
+      const properties = feature.properties || {};
+      const id = `OSM-${properties.osm_id || index + 1}`;
+      const label = String(properties.label || properties.ref || properties.name || `Destino ${index + 1}`).trim();
+
+      return {
+        id,
+        accessible: properties.wheelchair === "yes" || properties.wheelchair === "designated",
+        attributes: {
+          BLOCO: properties.ref || "",
+          DESCRICAO: properties.name || label,
+          WHEELCHAIR: properties.wheelchair || ""
+        },
+        blockName: properties.building || properties.amenity || "OSM",
+        category: properties.entrance ? "entrance" : "node",
+        flow: "BOTH",
+        graphNodeKey,
+        layer: "OpenStreetMap",
+        level: properties.level || "",
+        name: label,
+        position: { x: coordinate[0], y: coordinate[1], z: 0 },
+        type: properties.amenity || properties.building || "destination"
+      };
+    })
+    .filter((destination) => destination.graphNodeKey)
+    .sort((left, right) => naturalCompare(left.name, right.name));
+
+  state.osmGraphNodes = routingGraphNodes;
+  state.osmAdjacency = routingAdjacency;
+  state.osmDestinations = destinations;
+  state.nodes = destinations;
+  state.nodeById = new Map(destinations.map((destination) => [destination.id, destination]));
+  state.graphReady = routingGraphNodes.size > 0 && destinations.length > 1;
+  refs.nodeCount.textContent = String(routingGraphNodes.size);
+  refs.edgeCount.textContent = String(
+    [...routingAdjacency.values()].reduce((total, edges) => total + edges.length, 0) / 2
+  );
+  populateOsmControls();
+  updateVoiceRecognitionGrammar();
+}
+
+function findNearestOsmEntrance(coordinate, entranceCoordinates, maximumDistance = 90) {
+  let nearest = null;
+  let distance = Infinity;
+  entranceCoordinates.forEach((candidate) => {
+    const candidateDistance = haversineDistance(coordinate, candidate);
+    if (candidateDistance < distance) {
+      distance = candidateDistance;
+      nearest = candidate;
+    }
+  });
+  return distance <= maximumDistance ? nearest : null;
+}
+
+function populateOsmControls() {
+  refs.originSelect.replaceChildren();
+  refs.destinationSelect.replaceChildren();
+
+  state.osmDestinations.forEach((destination) => {
+    refs.originSelect.appendChild(new Option(destination.name, destination.id));
+    refs.destinationSelect.appendChild(new Option(destination.name, destination.id));
+  });
+
+  const origin = state.osmDestinations.find((item) => normalizeVoiceComparable(item.name) === "1a")
+    || state.osmDestinations[0];
+  const destination = state.osmDestinations.find((item) => normalizeVoiceComparable(item.name) === "3e")
+    || state.osmDestinations.at(-1);
+  refs.originSelect.value = origin?.id || "";
+  refs.destinationSelect.value = destination?.id || origin?.id || "";
+}
+
+function osmCoordinateKey(coordinate) {
+  return `${Number(coordinate?.[0]).toFixed(7)},${Number(coordinate?.[1]).toFixed(7)}`;
+}
+
+function findNearestOsmGraphNode(coordinate, graphNodes = state.osmGraphNodes) {
+  let nearestKey = null;
+  let nearestDistance = Infinity;
+
+  graphNodes.forEach((candidate, key) => {
+    const distance = haversineDistance(coordinate, candidate);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestKey = key;
+    }
+  });
+
+  return nearestKey;
+}
+
+function getOsmAccessibilityPenalty(properties) {
+  if (properties.highway === "steps" || properties.wheelchair === "no") {
+    return 1000;
+  }
+  if (properties.wheelchair === "limited" || properties.surface === "unpaved") {
+    return 4;
+  }
+  return 1;
+}
+
+function haversineDistance(left, right) {
+  const earthRadius = 6371000;
+  const toRadians = (degrees) => degrees * Math.PI / 180;
+  const lat1 = toRadians(Number(left?.[1] || 0));
+  const lat2 = toRadians(Number(right?.[1] || 0));
+  const deltaLat = lat2 - lat1;
+  const deltaLng = toRadians(Number(right?.[0] || 0) - Number(left?.[0] || 0));
+  const value = Math.sin(deltaLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) ** 2;
+  return 2 * earthRadius * Math.asin(Math.sqrt(value));
+}
+
+function calculateAndRenderOsmRoute() {
+  const origin = state.nodeById.get(refs.originSelect.value);
+  const destination = state.nodeById.get(refs.destinationSelect.value);
+
+  if (!origin || !destination || origin.id === destination.id) {
+    clearOsmRoute("Escolha origem e destino diferentes.");
+    return;
+  }
+
+  const route = findOsmShortestPath(origin.graphNodeKey, destination.graphNodeKey);
+  if (!route) {
+    clearOsmRoute(`Sem caminho conectado entre ${origin.name} e ${destination.name}.`);
+    return;
+  }
+
+  if (state.osmRouteLayer) {
+    state.osmRouteLayer.remove();
+  }
+
+  const latLngs = route.nodeKeys.map((key) => {
+    const coordinate = state.osmGraphNodes.get(key);
+    return [coordinate[1], coordinate[0]];
+  });
+  const casing = L.polyline(latLngs, { color: "#ffffff", opacity: 0.96, weight: 12 });
+  const line = L.polyline(latLngs, { color: "#f59e0b", opacity: 1, weight: 7 });
+  state.osmRouteLayer = L.layerGroup([casing, line]).addTo(state.osmMap);
+  updateMapboxOsmRoute(route.nodeKeys);
+  state.route = route;
+  refs.routeDistance.textContent = `${roundNumber(route.distance, 1).toLocaleString("pt-BR")} m`;
+  refs.pathText.textContent = `${origin.name} → ${destination.name}`;
+  state.osmMap.fitBounds(line.getBounds(), { padding: [70, 70] });
+  setStatus(`Rota OpenStreetMap calculada de ${origin.name} para ${destination.name}.`, "success");
+}
+
+function updateMapboxOsmData() {
+  if (!state.mapboxReady || !state.threeDMap || !state.osmGeoJson) {
+    return;
+  }
+
+  const features = state.osmGeoJson.features || [];
+  const paths = features.filter((feature) => feature?.properties?.feature_class === "pedestrian_path");
+  const points = features
+    .filter((feature) => feature?.geometry?.type === "Point")
+    .map((feature) => ({
+      ...feature,
+      properties: {
+        ...feature.properties,
+        category: feature.properties?.feature_class === "destination" ? "building" : "ramp"
+      }
+    }));
+  state.threeDMap.getSource("accessibility-edges")?.setData(createFeatureCollection(paths));
+  state.threeDMap.getSource("accessibility-nodes")?.setData(createFeatureCollection(points));
+}
+
+function updateMapboxOsmRoute(nodeKeys = []) {
+  if (!state.mapboxReady || !state.threeDMap) {
+    return;
+  }
+
+  const coordinates = nodeKeys.map((key) => state.osmGraphNodes.get(key)).filter(Boolean);
+  const features = coordinates.length >= 2 ? [{
+    type: "Feature",
+    properties: {},
+    geometry: { type: "LineString", coordinates }
+  }] : [];
+  state.threeDMap.getSource("accessibility-route")?.setData(createFeatureCollection(features));
+}
+
+function clearOsmRoute(message) {
+  state.osmRouteLayer?.remove();
+  state.osmRouteLayer = null;
+  updateMapboxOsmRoute();
+  state.route = null;
+  refs.routeDistance.textContent = "-";
+  refs.pathText.textContent = message;
+  setStatus(message, "warning");
+}
+
+function findOsmShortestPath(originKey, destinationKey) {
+  const distances = new Map([...state.osmGraphNodes.keys()].map((key) => [key, Infinity]));
+  const physicalDistances = new Map([...state.osmGraphNodes.keys()].map((key) => [key, Infinity]));
+  const previous = new Map();
+  const unvisited = new Set(state.osmGraphNodes.keys());
+  distances.set(originKey, 0);
+  physicalDistances.set(originKey, 0);
+
+  while (unvisited.size) {
+    let current = null;
+    let currentDistance = Infinity;
+    unvisited.forEach((key) => {
+      if (distances.get(key) < currentDistance) {
+        current = key;
+        currentDistance = distances.get(key);
+      }
+    });
+    if (!current || currentDistance === Infinity) {
+      break;
+    }
+    unvisited.delete(current);
+    if (current === destinationKey) {
+      break;
+    }
+
+    (state.osmAdjacency.get(current) || []).forEach((edge) => {
+      if (!unvisited.has(edge.to)) {
+        return;
+      }
+      const nextDistance = currentDistance + edge.weight;
+      if (nextDistance < distances.get(edge.to)) {
+        distances.set(edge.to, nextDistance);
+        physicalDistances.set(edge.to, physicalDistances.get(current) + edge.distance);
+        previous.set(edge.to, current);
+      }
+    });
+  }
+
+  if (!previous.has(destinationKey)) {
+    return null;
+  }
+
+  const nodeKeys = [destinationKey];
+  let cursor = destinationKey;
+  while (cursor !== originKey) {
+    cursor = previous.get(cursor);
+    if (!cursor) {
+      return null;
+    }
+    nodeKeys.unshift(cursor);
+  }
+
+  return { nodeKeys, distance: physicalDistances.get(destinationKey) };
 }
 
 function addMapboxBaseControls() {
@@ -1669,6 +2161,11 @@ function createNodeSymbol(node) {
 }
 
 function calculateAndRenderRoute() {
+  if (state.osmReady) {
+    calculateAndRenderOsmRoute();
+    return;
+  }
+
   if (!state.graphReady) {
     return;
   }

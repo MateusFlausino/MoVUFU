@@ -1,7 +1,7 @@
 {
   "name": "MoV UFU - Roteador Acessivel",
   "short_name": "MoV UFU",
-  "description": "Navegacao acessivel pela planta da UFU.",
+  "description": "Navegacao acessivel no Campus Santa Monica com dados OpenStreetMap.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
