@@ -5,12 +5,12 @@
     "source": "OpenStreetMap contributors",
     "source_url": "https://www.openstreetmap.org/copyright",
     "license": "ODbL 1.0",
-    "retrieved_at": "2026-07-01T21:50:19.038127+00:00",
+    "retrieved_at": "2026-07-01T21:57:13.581659+00:00",
     "bbox": [
-      -48.262273,
-      -18.9208408,
-      -48.2539403,
-      -18.9159454
+      -48.26232,
+      -18.92084,
+      -48.25386,
+      -18.91589
     ],
     "pedestrian_path_count": 207,
     "accessibility_point_count": 82,

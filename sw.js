@@ -1,4 +1,4 @@
-const CACHE_NAME = "movufu-v10";
+const CACHE_NAME = "movufu-v12";
 const APP_SHELL = [
   "/",
   "/index.html",

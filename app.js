@@ -5,7 +5,7 @@ const OSM_OVERPASS_URLS = [
   "https://overpass.kumi.systems/api/interpreter"
 ];
 const OSM_CAMPUS_BOUNDARY_ID = 804592441;
-const OSM_CAMPUS_BBOX = [-18.9208408, -48.2622730, -18.9159454, -48.2539403];
+const OSM_CAMPUS_BBOX = [-18.92084, -48.26232, -18.91589, -48.25386];
 const OSM_LIVE_TIMEOUT_MS = 20000;
 const OSM_ROUTABLE_HIGHWAYS = new Set([
   "footway", "path", "pedestrian", "steps", "living_street",
@@ -754,16 +754,32 @@ function initializeOsmMap() {
     return Promise.resolve();
   }
 
+  const campusFocusBounds = L.latLngBounds(
+    [OSM_CAMPUS_BBOX[0], OSM_CAMPUS_BBOX[1]],
+    [OSM_CAMPUS_BBOX[2], OSM_CAMPUS_BBOX[3]]
+  );
   const map = L.map(refs.osmMap, {
     attributionControl: true,
     zoomControl: false,
-    maxBounds: [
-      [OSM_CAMPUS_BBOX[0], OSM_CAMPUS_BBOX[1]],
-      [OSM_CAMPUS_BBOX[2], OSM_CAMPUS_BBOX[3]]
-    ],
+    maxBounds: campusFocusBounds,
     maxBoundsViscosity: 1,
     minZoom: 16
   }).setView([-18.9184, -48.2581], 17);
+  const enforceCampusFocus = () => {
+    const focusZoom = map.getBoundsZoom(campusFocusBounds, true);
+    map.setMinZoom(Math.max(17, Number.isFinite(focusZoom) ? focusZoom : 17));
+    map.panInsideBounds(campusFocusBounds, { animate: false });
+  };
+  enforceCampusFocus();
+  map.on("resize", enforceCampusFocus);
+  L.rectangle(campusFocusBounds, {
+    color: "#2563eb",
+    dashArray: "8 6",
+    fill: false,
+    interactive: false,
+    opacity: 0.9,
+    weight: 3
+  }).addTo(map);
 
   const osmBaseLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 20,
@@ -801,12 +817,23 @@ function initializeOsmMap() {
   legend.onAdd = () => {
     const container = L.DomUtil.create("div", "osm-legend");
     container.innerHTML = [
-      "<strong>Acessibilidade UFU</strong>",
+      '<button type="button" class="osm-legend__toggle" aria-expanded="false">Legenda <span aria-hidden="true">＋</span></button>',
+      '<div class="osm-legend__content" hidden>',
       '<span class="osm-legend__item"><i class="osm-legend__line"></i>Caminho de pedestres</span>',
       '<span class="osm-legend__item"><i class="osm-legend__point"></i>Travessia / rampa candidata</span>',
       '<span class="osm-legend__item"><i class="osm-legend__building"></i>Delimitacao dos blocos</span>',
-      '<small class="osm-legend__warning">Confirmar rampas em campo antes de indicar rota acessivel.</small>'
+      '<small class="osm-legend__warning">Confirmar rampas em campo antes de indicar rota acessivel.</small>',
+      "</div>"
     ].join("");
+    const toggle = container.querySelector(".osm-legend__toggle");
+    const content = container.querySelector(".osm-legend__content");
+    L.DomEvent.disableClickPropagation(container);
+    toggle.addEventListener("click", () => {
+      const expanded = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", String(!expanded));
+      toggle.querySelector("span").textContent = expanded ? "＋" : "−";
+      content.hidden = expanded;
+    });
     return container;
   };
   legend.addTo(map);
@@ -825,7 +852,7 @@ async function loadOsmAccessibilityLayer() {
     const layer = L.geoJSON(geoJson, {
       style(feature) {
         if (feature?.properties?.feature_class === "building_outline") {
-          return { color: "#dc2626", fillColor: "#ef4444", fillOpacity: 0.12, opacity: 0.8, weight: 2 };
+          return { color: "#64748b", fillColor: "#94a3b8", fillOpacity: 0.06, opacity: 0.55, weight: 1.4 };
         }
         const isSteps = feature?.properties?.highway === "steps";
         const isCrossing = feature?.properties?.footway === "crossing";
@@ -841,7 +868,7 @@ async function loadOsmAccessibilityLayer() {
       pointToLayer(feature, latlng) {
         const isDestination = feature?.properties?.feature_class === "destination";
         return L.circleMarker(latlng, {
-          radius: isDestination ? 5 : 7,
+          radius: isDestination ? 4.5 : 5.5,
           fillColor: isDestination ? "#2563eb" : "#f97316",
           fillOpacity: 0.95,
           color: "#ffffff",
@@ -1260,6 +1287,7 @@ function calculateAndRenderOsmRoute() {
   state.osmRouteLayer = L.layerGroup([casing, line]).addTo(state.osmMap);
   updateMapboxOsmRoute(route.nodeKeys);
   state.route = route;
+  refs.navigatorCard.classList.add("has-route");
   refs.routeDistance.textContent = `${roundNumber(route.distance, 1).toLocaleString("pt-BR")} m`;
   refs.pathText.textContent = `${origin.name} → ${destination.name}`;
   state.osmMap.fitBounds(line.getBounds(), { padding: [70, 70] });
@@ -1305,6 +1333,7 @@ function clearOsmRoute(message) {
   state.osmRouteLayer = null;
   updateMapboxOsmRoute();
   state.route = null;
+  refs.navigatorCard.classList.remove("has-route");
   refs.routeDistance.textContent = "-";
   refs.pathText.textContent = message;
   setStatus(message, "warning");

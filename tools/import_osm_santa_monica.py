@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-BBOX = (-48.2622730, -18.9208408, -48.2539403, -18.9159454)  # oeste, sul, leste, norte
+BBOX = (-48.26232, -18.92084, -48.25386, -18.91589)  # oeste, sul, leste, norte
 OSM_MAP_URL = (
     "https://api.openstreetmap.org/api/0.6/map"
     f"?bbox={BBOX[0]},{BBOX[1]},{BBOX[2]},{BBOX[3]}"
