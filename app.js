@@ -32,6 +32,18 @@ const DEFAULT_BUILDING_HEIGHT_MIN = 1;
 const DEFAULT_BUILDING_HEIGHT_MAX = 120;
 const VOICE_LISTENING_TIMEOUT_MS = 15000;
 const VOICE_MAX_ALTERNATIVES = 5;
+const PORTUGUESE_SPOKEN_LETTERS = {
+  a: "a", be: "b", b: "b", ce: "c", c: "c", de: "d", d: "d", e: "e",
+  efe: "f", f: "f", ge: "g", g: "g", aga: "h", h: "h", i: "i", jota: "j", j: "j",
+  ka: "k", k: "k", ele: "l", l: "l", eme: "m", m: "m", ene: "n", n: "n", o: "o",
+  pe: "p", p: "p", que: "q", q: "q", erre: "r", r: "r", esse: "s", s: "s",
+  te: "t", t: "t", u: "u", ve: "v", v: "v", xis: "x", x: "x", ze: "z", z: "z"
+};
+const PORTUGUESE_LETTER_NAMES = {
+  a: "a", b: "be", c: "ce", d: "de", e: "e", f: "efe", g: "ge", h: "aga", i: "i",
+  j: "jota", k: "ka", l: "ele", m: "eme", n: "ene", o: "o", p: "pe", q: "que",
+  r: "erre", s: "esse", t: "te", u: "u", v: "ve", x: "xis", z: "ze"
+};
 
 const state = {
   adjacency: new Map(),
@@ -581,6 +593,7 @@ function extractBlockAliases(value) {
 
   for (const match of blockMatches) {
     const blockCode = match[1].replace(/\s+/g, "");
+    const codeMatch = blockCode.match(/^(\d+)([a-z])$/i);
     aliases.push(
       match[0],
       `bloco ${blockCode}`,
@@ -588,6 +601,15 @@ function extractBlockAliases(value) {
       `bloco ${blockCode.replace(/(\d)([a-z])/i, "$1 $2")}`,
       `predio ${blockCode.replace(/(\d)([a-z])/i, "$1 $2")}`
     );
+    if (codeMatch) {
+      const [, number, letter] = codeMatch;
+      const spokenLetter = PORTUGUESE_LETTER_NAMES[letter.toLowerCase()] || letter;
+      aliases.push(
+        `${number} ${spokenLetter}`,
+        `bloco ${number} ${spokenLetter}`,
+        `predio ${number} ${spokenLetter}`
+      );
+    }
   }
 
   return aliases;
@@ -608,7 +630,14 @@ function normalizeVoiceText(value) {
     .replace(/\s+/g, " ")
     .trim();
 
-  return replaceSpokenNumbers(normalized);
+  return normalizeSpokenBlockCodes(replaceSpokenNumbers(normalized));
+}
+
+function normalizeSpokenBlockCodes(value) {
+  return String(value || "").replace(/\b(\d+)\s+([a-z]+)\b/g, (match, number, spokenLetter) => {
+    const letter = PORTUGUESE_SPOKEN_LETTERS[spokenLetter];
+    return letter ? `${number}${letter}` : match;
+  });
 }
 
 function replaceSpokenNumbers(value) {
@@ -905,7 +934,13 @@ async function loadOsmAccessibilityLayer() {
       onEachFeature(feature, featureLayer) {
         const properties = feature?.properties || {};
         if (properties.feature_class === "destination") {
-          featureLayer.bindTooltip(properties.label || properties.name || "Destino", {
+          const label = properties.label || properties.name || "Destino";
+          featureLayer.bindTooltip(label, isOsmBlockLabel(label) ? {
+            className: "osm-block-label",
+            direction: "center",
+            opacity: 0.92,
+            permanent: true
+          } : {
             direction: "top",
             opacity: 0.9
           });
@@ -1144,6 +1179,10 @@ function isOsmWheelchairRamp(properties = {}) {
   );
 }
 
+function isOsmBlockLabel(value) {
+  return /^\d+\s*[a-z](?:[-\s].*)?$/i.test(String(value || "").trim());
+}
+
 function loadOsmRoutingGraph(geoJson) {
   const graphNodes = new Map();
   const adjacency = new Map();
@@ -1184,13 +1223,23 @@ function loadOsmRoutingGraph(geoJson) {
   const entranceCoordinates = (geoJson.features || [])
     .filter((feature) => feature?.properties?.feature_class === "entrance_point" && feature?.geometry?.type === "Point")
     .map((feature) => feature.geometry.coordinates);
+  const buildingOutlines = new Map(
+    (geoJson.features || [])
+      .filter((feature) => feature?.properties?.feature_class === "building_outline" && feature?.geometry?.type === "Polygon")
+      .map((feature) => [String(feature.properties.osm_id), feature.geometry.coordinates?.[0] || []])
+  );
   const destinations = (geoJson.features || [])
     .filter((feature) => feature?.properties?.feature_class === "destination" && feature?.geometry?.type === "Point")
     .map((feature, index) => {
       const coordinate = feature.geometry.coordinates;
-      const nearestEntrance = findNearestOsmEntrance(coordinate, entranceCoordinates);
-      const graphNodeKey = findNearestOsmGraphNode(nearestEntrance || coordinate, graphNodes);
       const properties = feature.properties || {};
+      const outline = buildingOutlines.get(String(properties.osm_id));
+      const entrancesInsideBuilding = outline?.length
+        ? entranceCoordinates.filter((entrance) => osmPointInPolygon(entrance, outline))
+        : [];
+      const nearestEntrance = findNearestOsmEntrance(coordinate, entrancesInsideBuilding, Infinity)
+        || findNearestOsmEntrance(coordinate, entranceCoordinates, 40);
+      const graphNodeKey = findNearestOsmGraphNode(nearestEntrance || coordinate, graphNodes);
       const id = `OSM-${properties.osm_id || index + 1}`;
       const label = String(properties.label || properties.ref || properties.name || `Destino ${index + 1}`).trim();
 
