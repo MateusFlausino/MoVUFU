@@ -629,6 +629,126 @@ input[type="text"] {
   box-shadow: 0 4px 14px rgba(5, 150, 105, 0.48);
 }
 
+.osm-ramp-popup {
+  width: min(280px, 72vw);
+  color: #172033;
+}
+
+.osm-ramp-popup__title {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+}
+
+.osm-ramp-popup__details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  margin: 0 0 10px;
+  font-size: 0.76rem;
+}
+
+.osm-ramp-popup__details dt {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.osm-ramp-popup__details dd {
+  margin: 0;
+  color: #334155;
+}
+
+.osm-ramp-photo-gallery {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 9px;
+}
+
+.osm-ramp-photo-gallery.is-empty {
+  display: block;
+  padding: 18px 8px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.osm-ramp-photo-empty {
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
+.osm-ramp-photo {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  margin: 0;
+  overflow: hidden;
+  border-radius: 9px;
+  background: #e2e8f0;
+}
+
+.osm-ramp-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.osm-ramp-photo__remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.82);
+  color: #fff;
+  font: 700 1rem/1 sans-serif;
+  cursor: pointer;
+}
+
+.osm-ramp-photo-upload {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid #a7f3d0;
+  border-radius: 10px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.osm-ramp-photo-upload:hover,
+.osm-ramp-photo-upload:focus-within {
+  border-color: #10b981;
+  background: #d1fae5;
+}
+
+.osm-ramp-photo-upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.osm-ramp-photo-status {
+  min-height: 1em;
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
 .osm-block-label {
   padding: 2px 5px;
   border: 1px solid rgba(51, 65, 85, 0.3);

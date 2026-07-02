@@ -17,6 +17,7 @@ const MAX_UPLOAD_BYTES = 80 * 1024 * 1024;
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
+  ".geojson": "application/geo+json; charset=utf-8",
   ".html": "text/html; charset=utf-8",
   ".ico": "image/x-icon",
   ".jpeg": "image/jpeg",

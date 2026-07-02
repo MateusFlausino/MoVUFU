@@ -42,6 +42,13 @@ const VOICE_GENETIC_DEFAULT_WEIGHTS = Object.freeze({
 const VOICE_GENETIC_POPULATION_SIZE = 8;
 const VOICE_GENETIC_GENERATIONS = 5;
 const VOICE_GENETIC_STORAGE_PREFIX = "movufu-voice-ga:v1:";
+const RAMP_PHOTO_DB_NAME = "movufu-ramp-photos";
+const RAMP_PHOTO_STORE_NAME = "photos";
+const RAMP_PHOTO_MAX_COUNT = 3;
+const RAMP_PHOTO_MAX_INPUT_BYTES = 8 * 1024 * 1024;
+const RAMP_PHOTO_MAX_EDGE = 1280;
+const RAMP_PHOTO_REMOTE_ENDPOINT = "/api/ramp-photos";
+const RAMP_PHOTO_DELETE_TOKEN_PREFIX = "movufu-ramp-photo-delete:";
 const PORTUGUESE_SPOKEN_LETTERS = {
   a: "a", be: "b", b: "b", ce: "c", c: "c", de: "d", d: "d", e: "e",
   efe: "f", f: "f", ge: "g", g: "g", aga: "h", h: "h", i: "i", jota: "j", j: "j",
@@ -1216,12 +1223,9 @@ async function loadOsmAccessibilityLayer() {
             opacity: 0.9
           });
         } else if (isOsmWheelchairRamp(properties)) {
-          featureLayer.bindPopup([
-            "<strong>Rampa / guia acessivel</strong>",
-            properties.kerb ? `<br>Guia: ${properties.kerb}` : "",
-            properties.wheelchair ? `<br>Cadeira de rodas: ${properties.wheelchair}` : "",
-            properties.tactile_paving ? `<br>Piso tatil: ${properties.tactile_paving}` : ""
-          ].join(""));
+          const popupContent = createOsmRampPopup(feature);
+          featureLayer.bindPopup(popupContent, { maxWidth: 330, minWidth: 260 });
+          featureLayer.on("popupopen", () => refreshOsmRampPhotoGallery(popupContent));
         } else if (feature?.geometry?.type === "Point") {
           featureLayer.bindPopup([
             "<strong>Travessia mapeada</strong>",
@@ -1251,6 +1255,327 @@ async function loadOsmAccessibilityLayer() {
     refs.osmViewBtn.disabled = true;
     refs.osmViewBtn.title = "Caminhos OpenStreetMap indisponiveis.";
   }
+}
+
+function createOsmRampPopup(feature) {
+  const properties = feature?.properties || {};
+  const featureId = getOsmRampPhotoFeatureId(feature);
+  const popup = document.createElement("section");
+  popup.className = "osm-ramp-popup";
+  popup.dataset.rampPhotoFeatureId = featureId;
+
+  const title = document.createElement("strong");
+  title.className = "osm-ramp-popup__title";
+  title.textContent = "♿ Rampa / guia acessível";
+  popup.appendChild(title);
+
+  const details = document.createElement("dl");
+  details.className = "osm-ramp-popup__details";
+  [
+    ["Guia", properties.kerb],
+    ["Cadeira de rodas", properties.wheelchair],
+    ["Piso tátil", properties.tactile_paving]
+  ].filter(([, value]) => value).forEach(([label, value]) => {
+    const term = document.createElement("dt");
+    const description = document.createElement("dd");
+    term.textContent = label;
+    description.textContent = value;
+    details.append(term, description);
+  });
+  popup.appendChild(details);
+
+  const gallery = document.createElement("div");
+  gallery.className = "osm-ramp-photo-gallery";
+  gallery.setAttribute("aria-label", "Fotos desta rampa");
+  popup.appendChild(gallery);
+
+  const uploadLabel = document.createElement("label");
+  uploadLabel.className = "osm-ramp-photo-upload";
+  uploadLabel.innerHTML = '<span aria-hidden="true">＋</span> Adicionar foto';
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/jpeg,image/png,image/webp";
+  input.multiple = true;
+  input.setAttribute("capture", "environment");
+  input.setAttribute("aria-label", "Adicionar fotos desta rampa");
+  input.addEventListener("change", () => uploadOsmRampPhotos(popup, input));
+  uploadLabel.appendChild(input);
+  popup.appendChild(uploadLabel);
+
+  const status = document.createElement("p");
+  status.className = "osm-ramp-photo-status";
+  status.setAttribute("aria-live", "polite");
+  status.textContent = "Carregando fotos...";
+  popup.appendChild(status);
+
+  return popup;
+}
+
+function getOsmRampPhotoFeatureId(feature) {
+  if (feature?.id) {
+    return String(feature.id);
+  }
+  if (feature?.properties?.osm_id) {
+    return `osm/${feature.properties.osm_id}`;
+  }
+  return `coordinate/${(feature?.geometry?.coordinates || []).join(",")}`;
+}
+
+async function uploadOsmRampPhotos(popup, input) {
+  const status = popup.querySelector(".osm-ramp-photo-status");
+  const files = [...(input.files || [])];
+  input.value = "";
+
+  if (!files.length) {
+    return;
+  }
+
+  try {
+    const featureId = popup.dataset.rampPhotoFeatureId;
+    const remotePhotos = await getRemoteOsmRampPhotos(featureId);
+    const usesRemoteStorage = remotePhotos !== null;
+    const existing = usesRemoteStorage ? remotePhotos : await getOsmRampPhotos(featureId);
+    const availableSlots = RAMP_PHOTO_MAX_COUNT - existing.length;
+
+    if (availableSlots <= 0) {
+      status.textContent = `Limite de ${RAMP_PHOTO_MAX_COUNT} fotos. Exclua uma para adicionar outra.`;
+      return;
+    }
+
+    const acceptedFiles = files.slice(0, availableSlots);
+    status.textContent = "Preparando foto...";
+
+    for (const file of acceptedFiles) {
+      if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+        throw new Error("Use uma imagem JPG, PNG ou WebP.");
+      }
+      if (file.size > RAMP_PHOTO_MAX_INPUT_BYTES) {
+        throw new Error("Cada foto pode ter no máximo 8 MB.");
+      }
+
+      const blob = await prepareOsmRampPhoto(file);
+      if (usesRemoteStorage) {
+        await uploadRemoteOsmRampPhoto(featureId, blob, file.name);
+      } else {
+        await addOsmRampPhoto({
+          featureId,
+          blob,
+          name: file.name || "foto-da-rampa.jpg",
+          createdAt: Date.now()
+        });
+      }
+    }
+
+    await refreshOsmRampPhotoGallery(popup);
+    status.textContent = acceptedFiles.length < files.length
+      ? `Fotos salvas. O limite é ${RAMP_PHOTO_MAX_COUNT} por rampa.`
+      : usesRemoteStorage ? "Foto compartilhada com os usuários do MoV UFU." : "Foto salva neste dispositivo.";
+  } catch (error) {
+    status.textContent = error?.message || "Não foi possível salvar a foto.";
+  }
+}
+
+async function refreshOsmRampPhotoGallery(popup) {
+  const gallery = popup.querySelector(".osm-ramp-photo-gallery");
+  const status = popup.querySelector(".osm-ramp-photo-status");
+
+  try {
+    const featureId = popup.dataset.rampPhotoFeatureId;
+    const remotePhotos = await getRemoteOsmRampPhotos(featureId);
+    const usesRemoteStorage = remotePhotos !== null;
+    const photos = usesRemoteStorage ? remotePhotos : await getOsmRampPhotos(featureId);
+    gallery.replaceChildren();
+    gallery.classList.toggle("is-empty", photos.length === 0);
+
+    if (!photos.length) {
+      const emptyMessage = document.createElement("span");
+      emptyMessage.className = "osm-ramp-photo-empty";
+      emptyMessage.textContent = "Nenhuma foto adicionada";
+      gallery.appendChild(emptyMessage);
+      status.textContent = usesRemoteStorage
+        ? "As fotos adicionadas serão compartilhadas com os usuários."
+        : "As fotos ficam salvas neste dispositivo.";
+      return;
+    }
+
+    photos.forEach((photo, index) => {
+      const figure = document.createElement("figure");
+      figure.className = "osm-ramp-photo";
+      const image = document.createElement("img");
+      const objectUrl = photo.blob ? URL.createObjectURL(photo.blob) : "";
+      image.src = photo.imageUrl || objectUrl;
+      image.alt = `Foto ${index + 1} da rampa`;
+      image.loading = "lazy";
+      if (objectUrl) {
+        image.addEventListener("load", () => URL.revokeObjectURL(objectUrl), { once: true });
+        image.addEventListener("error", () => URL.revokeObjectURL(objectUrl), { once: true });
+      }
+      figure.appendChild(image);
+
+      const deleteToken = photo.pathname ? getRemoteOsmRampPhotoDeleteToken(photo.pathname) : "local";
+      if (deleteToken) {
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "osm-ramp-photo__remove";
+        removeButton.setAttribute("aria-label", `Excluir foto ${index + 1}`);
+        removeButton.textContent = "×";
+        removeButton.addEventListener("click", async () => {
+          removeButton.disabled = true;
+          try {
+            if (photo.pathname) {
+              await deleteRemoteOsmRampPhoto(featureId, photo.pathname, deleteToken);
+            } else {
+              await deleteOsmRampPhoto(photo.id);
+            }
+            await refreshOsmRampPhotoGallery(popup);
+            status.textContent = "Foto excluída.";
+          } catch (error) {
+            removeButton.disabled = false;
+            status.textContent = error?.message || "Não foi possível excluir a foto.";
+          }
+        });
+        figure.appendChild(removeButton);
+      }
+      gallery.appendChild(figure);
+    });
+    status.textContent = usesRemoteStorage
+      ? "Fotos compartilhadas pela comunidade MoV UFU."
+      : "Fotos salvas neste dispositivo.";
+  } catch (error) {
+    gallery.replaceChildren();
+    status.textContent = "O armazenamento de fotos não está disponível neste navegador.";
+  }
+}
+
+async function getRemoteOsmRampPhotos(featureId) {
+  let response;
+  try {
+    response = await fetch(`${RAMP_PHOTO_REMOTE_ENDPOINT}?featureId=${encodeURIComponent(featureId)}`, {
+      cache: "no-store",
+      headers: { Accept: "application/json" }
+    });
+  } catch (error) {
+    return null;
+  }
+  const contentType = response.headers.get("content-type") || "";
+
+  if ([404, 405].includes(response.status) || !contentType.includes("application/json")) {
+    return null;
+  }
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "O armazenamento compartilhado está indisponível.");
+  }
+  return Array.isArray(data.photos) ? data.photos : [];
+}
+
+async function uploadRemoteOsmRampPhoto(featureId, blob, originalName) {
+  const form = new FormData();
+  const safeName = String(originalName || "foto-da-rampa.jpg").replace(/[^a-zA-Z0-9._-]/g, "-");
+  form.append("featureId", featureId);
+  form.append("file", blob, safeName);
+  const response = await fetch(RAMP_PHOTO_REMOTE_ENDPOINT, { method: "PUT", body: form });
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.error || "Não foi possível enviar a foto.");
+  }
+  if (data.photo?.pathname && data.deleteToken) {
+    window.localStorage?.setItem(RAMP_PHOTO_DELETE_TOKEN_PREFIX + data.photo.pathname, data.deleteToken);
+  }
+  return data.photo;
+}
+
+async function deleteRemoteOsmRampPhoto(featureId, pathname, deleteToken) {
+  const response = await fetch(RAMP_PHOTO_REMOTE_ENDPOINT, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ featureId, pathname, deleteToken })
+  });
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.error || "Não foi possível excluir a foto.");
+  }
+  window.localStorage?.removeItem(RAMP_PHOTO_DELETE_TOKEN_PREFIX + pathname);
+}
+
+function getRemoteOsmRampPhotoDeleteToken(pathname) {
+  return window.localStorage?.getItem(RAMP_PHOTO_DELETE_TOKEN_PREFIX + pathname) || "";
+}
+
+async function prepareOsmRampPhoto(file) {
+  if (typeof createImageBitmap !== "function") {
+    return file;
+  }
+
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, RAMP_PHOTO_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => blob ? resolve(blob) : reject(new Error("Não foi possível preparar a foto.")),
+      "image/jpeg",
+      0.84
+    );
+  });
+}
+
+function openOsmRampPhotoDatabase() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error("Armazenamento local indisponível."));
+      return;
+    }
+
+    const request = window.indexedDB.open(RAMP_PHOTO_DB_NAME, 1);
+    request.addEventListener("upgradeneeded", () => {
+      const database = request.result;
+      const store = database.createObjectStore(RAMP_PHOTO_STORE_NAME, { keyPath: "id", autoIncrement: true });
+      store.createIndex("featureId", "featureId", { unique: false });
+    });
+    request.addEventListener("success", () => resolve(request.result));
+    request.addEventListener("error", () => reject(request.error));
+  });
+}
+
+async function getOsmRampPhotos(featureId) {
+  const database = await openOsmRampPhotoDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(RAMP_PHOTO_STORE_NAME, "readonly");
+    const request = transaction.objectStore(RAMP_PHOTO_STORE_NAME).index("featureId").getAll(featureId);
+    request.addEventListener("success", () => resolve(request.result.sort((left, right) => left.createdAt - right.createdAt)));
+    request.addEventListener("error", () => reject(request.error));
+    transaction.addEventListener("complete", () => database.close());
+  });
+}
+
+async function addOsmRampPhoto(photo) {
+  const database = await openOsmRampPhotoDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(RAMP_PHOTO_STORE_NAME, "readwrite");
+    const request = transaction.objectStore(RAMP_PHOTO_STORE_NAME).add(photo);
+    request.addEventListener("success", () => resolve(request.result));
+    request.addEventListener("error", () => reject(request.error));
+    transaction.addEventListener("complete", () => database.close());
+  });
+}
+
+async function deleteOsmRampPhoto(photoId) {
+  const database = await openOsmRampPhotoDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(RAMP_PHOTO_STORE_NAME, "readwrite");
+    const request = transaction.objectStore(RAMP_PHOTO_STORE_NAME).delete(photoId);
+    request.addEventListener("success", () => resolve());
+    request.addEventListener("error", () => reject(request.error));
+    transaction.addEventListener("complete", () => database.close());
+  });
 }
 
 async function fetchCurrentOsmGeoJson() {

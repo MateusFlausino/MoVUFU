@@ -1,4 +1,4 @@
-const CACHE_NAME = "movufu-v21";
+const CACHE_NAME = "movufu-v23";
 const APP_SHELL = [
   "/",
   "/index.html",
@@ -37,6 +37,10 @@ self.addEventListener("fetch", (event) => {
   }
 
   const requestUrl = new URL(event.request.url);
+  if (requestUrl.pathname.startsWith("/api/")) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
   if (requestUrl.origin !== self.location.origin) {
     event.respondWith(fetch(event.request));
     return;

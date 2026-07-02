@@ -32,6 +32,8 @@ assert.equal(
 assert.equal(isOsmBlockLabel("1C"), true);
 assert.equal(isOsmBlockLabel("Biblioteca"), false);
 assert.equal(osmPointInPolygon([1, 1], [[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]), true);
+assert.equal(getOsmRampPhotoFeatureId({ id: "node/123" }), "node/123");
+assert.equal(getOsmRampPhotoFeatureId({ properties: { osm_id: "456" } }), "osm/456");
 assert.equal(JSON.stringify(findVoiceRoutePair("3D para 1E")), JSON.stringify({ originId: "N4", destinationId: "N1" }));
 assert.equal(JSON.stringify(findVoiceRoutePair("tres de para um e")), JSON.stringify({ originId: "N4", destinationId: "N1" }));
 assert.equal(normalizeNodeCategory("ramp", "RAMP", "NODE_CROSSWALK", "A-ATRAVESSIA"), "crosswalk");
@@ -89,7 +91,7 @@ assert.deepEqual(findVoiceRoutePair("do bloco um e para o bloco tres e"), { orig
 assert.deepEqual(findVoiceRoutePair("do bloco tres e para um e"), { originId: "BLOCK_26", destinationId: "BLOCK_4" });
 assert.deepEqual(findVoiceRoutePair("tres de para um e"), { originId: "BLOCK_25", destinationId: "BLOCK_4" });
 
-console.log("Voice and OSM parser: 21 unit tests + " + directedPairCount + " directed route pairs passed. GA fitness: " + geneticResult.fitness.toFixed(4) + ".");
+console.log("Voice, photos and OSM parser: 23 unit tests + " + directedPairCount + " directed route pairs passed. GA fitness: " + geneticResult.fitness.toFixed(4) + ".");
 `;
 
 vm.runInNewContext(`${appSource}\n${tests}`, {
