@@ -20,10 +20,10 @@ const MAPBOX_UBERLANDIA_BOUNDS = [
   [-48.10, -18.80]
 ];
 const MAPBOX_ACCESSIBILITY_BOUNDS = {
-  west: -48.2685,
-  south: -18.9295,
-  east: -48.2445,
-  north: -18.9105
+  west: -48.26232,
+  south: -18.92084,
+  east: -48.25386,
+  north: -18.91589
 };
 const MAPBOX_BUILDING_MIN_AREA = 100000;
 const MAPBOX_BUILDING_MAX_COUNT = 240;
@@ -53,6 +53,8 @@ const state = {
   osmAccessibilityLayer: null,
   osmAdjacency: new Map(),
   osmDestinations: [],
+  osmDwgGraphLayer: null,
+  osmDwgRouteLayer: null,
   osmGeoJson: null,
   osmGraphNodes: new Map(),
   osmMap: null,
@@ -62,6 +64,7 @@ const state = {
   rawData: null,
   rawRouteBounds: null,
   route: null,
+  routingMode: "dwg",
   selectedBuildingId: null,
   threeDMap: null,
   voiceHadResult: false,
@@ -84,6 +87,7 @@ async function initializeApp() {
   window.lucide?.createIcons();
   initializeMapboxMap();
   await initializeOsmMap();
+  await loadCurrentMapData("Carregando o grafo cadastrado...");
 }
 
 async function loadCurrentMapData(statusText = "Carregando planta...") {
@@ -97,10 +101,12 @@ async function loadCurrentMapData(statusText = "Carregando planta...") {
 
     const rawData = await response.json();
     loadGraph(rawData);
+    state.routingMode = "dwg";
     populateControls();
     renderMap();
+    renderDwgGraphOnOsm();
     calculateAndRenderRoute();
-    setStatus(buildLoadedStatus(rawData));
+    setStatus(`Grafo cadastrado carregado: ${state.nodes.length} nos e ${state.edges.length} ligacoes.`, "success");
   } catch (error) {
     console.error(error);
     setStatus(`Nao foi possivel carregar a planta: ${error.message}`, "error");
@@ -242,7 +248,13 @@ function bindEvents() {
   refs.osmViewBtn.addEventListener("click", () => setViewMode("osm"));
   refs.voiceBtn.addEventListener("click", toggleVoiceRecognition);
   refs.voicePanelToggleBtn.addEventListener("click", toggleVoicePanel);
-  refs.clearRouteBtn.addEventListener("click", () => clearOsmRoute("Escolha uma nova origem e destino."));
+  refs.clearRouteBtn.addEventListener("click", () => {
+    if (state.routingMode === "osm") {
+      clearOsmRoute("Escolha uma nova origem e destino.");
+    } else {
+      clearRoute("Escolha uma nova origem e destino.");
+    }
+  });
   refs.voiceCommandForm.addEventListener("submit", handleManualVoiceCommand);
 
   refs.svg.addEventListener("wheel", handleMapWheel, { passive: false });
@@ -835,6 +847,7 @@ function initializeOsmMap() {
       '<button type="button" class="osm-legend__toggle" aria-expanded="false">Legenda <span aria-hidden="true">＋</span></button>',
       '<div class="osm-legend__content" hidden>',
       '<span class="osm-legend__item"><i class="osm-legend__line"></i>Caminho de pedestres</span>',
+      '<span class="osm-legend__item"><i class="osm-legend__graph"></i>Grafo cadastrado</span>',
       '<span class="osm-legend__item"><i class="osm-legend__point"></i>Travessia / rampa candidata</span>',
       '<span class="osm-legend__item"><i class="osm-legend__wheelchair">♿</i>Rampa / guia acessivel</span>',
       '<span class="osm-legend__item"><i class="osm-legend__building"></i>Delimitacao dos blocos</span>',
@@ -863,7 +876,6 @@ async function loadOsmAccessibilityLayer() {
     setStatus("Consultando a versao mais recente do OpenStreetMap...");
     const { geoJson, source } = await fetchCurrentOsmGeoJson();
     state.osmGeoJson = geoJson;
-    loadOsmRoutingGraph(geoJson);
     updateMapboxOsmData();
     const layer = L.geoJSON(geoJson, {
       style(feature) {
@@ -938,11 +950,10 @@ async function loadOsmAccessibilityLayer() {
     state.osmAccessibilityLayer = layer;
     state.osmReady = true;
     setViewMode("osm");
-    calculateAndRenderRoute();
     const metadata = geoJson.metadata || {};
     const sourceLabel = source === "live" ? "dados atuais" : "copia local de contingencia";
     setStatus(
-      `OpenStreetMap (${sourceLabel}): ${metadata.pedestrian_path_count || 0} caminhos, ${metadata.accessibility_point_count || 0} travessias e ${state.osmDestinations.length} destinos conectados.`,
+      `OpenStreetMap (${sourceLabel}): ${metadata.pedestrian_path_count || 0} caminhos pedestres e ${metadata.accessibility_point_count || 0} pontos de acessibilidade.`,
       source === "live" ? "success" : "info"
     );
     if (layer.getBounds().isValid()) {
@@ -1780,6 +1791,69 @@ function loadGraph(rawData) {
   updateMapboxAccessibilityData();
 }
 
+function renderDwgGraphOnOsm() {
+  if (!state.osmMap || !state.edges.length) {
+    return;
+  }
+
+  state.osmDwgGraphLayer?.remove();
+  const layers = [];
+  state.edges.forEach((edge) => {
+    const latLngs = edge.points.map((point) => {
+      const [longitude, latitude] = rawPointToLngLat(point);
+      return [latitude, longitude];
+    });
+    layers.push(L.polyline(latLngs, {
+      className: "dwg-graph-edge",
+      color: "#0f766e",
+      opacity: 0.62,
+      weight: 3
+    }));
+  });
+
+  state.nodes.forEach((node) => {
+    const [longitude, latitude] = rawPointToLngLat(node.position);
+    const isAccessible = node.accessible || ["ramp", "accessible_entrance", "elevator"].includes(node.category);
+    const marker = L.circleMarker([latitude, longitude], {
+      className: "dwg-graph-node",
+      color: "#ffffff",
+      fillColor: isAccessible ? "#059669" : "#2563eb",
+      fillOpacity: 0.95,
+      opacity: 1,
+      radius: isAccessible ? 6 : 4.5,
+      weight: 2
+    });
+    marker.bindTooltip(getNodeOptionLabel(node), { direction: "top", opacity: 0.92 });
+    marker.on("click", () => selectNodeFromMap(node.id));
+    layers.push(marker);
+  });
+
+  state.osmDwgGraphLayer = L.layerGroup(layers).addTo(state.osmMap);
+}
+
+function renderDwgRouteOnOsm(route) {
+  if (!state.osmMap || !route?.points?.length) {
+    return;
+  }
+
+  clearDwgRouteOnOsm();
+  const latLngs = route.points.map((point) => {
+    const [longitude, latitude] = rawPointToLngLat(point);
+    return [latitude, longitude];
+  });
+  const casing = L.polyline(latLngs, { color: "#ffffff", opacity: 0.97, weight: 12 });
+  const line = L.polyline(latLngs, { color: "#2563eb", opacity: 1, weight: 7 });
+  state.osmDwgRouteLayer = L.layerGroup([casing, line]).addTo(state.osmMap);
+  if (line.getBounds().isValid()) {
+    state.osmMap.fitBounds(line.getBounds(), { padding: [70, 70] });
+  }
+}
+
+function clearDwgRouteOnOsm() {
+  state.osmDwgRouteLayer?.remove();
+  state.osmDwgRouteLayer = null;
+}
+
 function normalizeNodes(rawNodes) {
   const nodesById = new Map();
 
@@ -2318,7 +2392,7 @@ function createNodeSymbol(node) {
 }
 
 function calculateAndRenderRoute() {
-  if (state.osmReady) {
+  if (state.routingMode === "osm") {
     calculateAndRenderOsmRoute();
     return;
   }
@@ -2345,7 +2419,11 @@ function calculateAndRenderRoute() {
 
   if (!route) {
     clearSvgLayer(refs.routeLayer);
+    clearDwgRouteOnOsm();
+    refs.navigatorCard.classList.remove("has-route");
+    document.querySelector(".map-panel")?.classList.remove("has-route");
     refs.routeDistance.textContent = "-";
+    refs.routeDuration.textContent = "-";
     refs.pathText.textContent = "Sem conexao";
     refs.segmentList.innerHTML = "";
     updateMapboxAccessibilityData();
@@ -2355,8 +2433,12 @@ function calculateAndRenderRoute() {
   }
 
   renderRoute(route);
+  renderDwgRouteOnOsm(route);
+  refs.navigatorCard.classList.add("has-route");
+  document.querySelector(".map-panel")?.classList.add("has-route");
   updateMapboxAccessibilityData();
   refs.routeDistance.textContent = formatDistance(route.distance);
+  refs.routeDuration.textContent = `${Math.max(1, Math.ceil((route.distance / MILLIMETERS_PER_METER) / 66))} min`;
   refs.pathText.textContent = route.nodeIds.map(formatRouteNodeLabel).join(" -> ");
   renderSegmentList(route);
   syncActiveNodes();
@@ -2366,8 +2448,12 @@ function calculateAndRenderRoute() {
 function clearRoute(message) {
   state.route = null;
   clearSvgLayer(refs.routeLayer);
+  clearDwgRouteOnOsm();
+  refs.navigatorCard.classList.remove("has-route");
+  document.querySelector(".map-panel")?.classList.remove("has-route");
   updateMapboxAccessibilityData();
   refs.routeDistance.textContent = "-";
+  refs.routeDuration.textContent = "-";
   refs.pathText.textContent = message;
   refs.segmentList.innerHTML = "";
   setStatus(message, "warning");
