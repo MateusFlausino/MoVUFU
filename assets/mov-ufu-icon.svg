@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">MoV UFU</title>
+  <desc id="description">Caminho acessível com marcador de localização</desc>
+  <defs>
+    <linearGradient id="background" x1="76" y1="54" x2="438" y2="462" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2388d1"/>
+      <stop offset="1" stop-color="#07509b"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#background)"/>
+  <path d="M112 364C142 364 150 300 186 300S226 348 264 322c36-25 36-92 92-128" fill="none" stroke="#fff" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M330 166l88-24-28 86-20-28-40-34z" fill="#fff"/>
+  <path d="M170 98c-45 0-78 34-78 76 0 58 78 128 78 128s78-70 78-128c0-42-33-76-78-76z" fill="#fff"/>
+  <circle cx="170" cy="174" r="30" fill="#1269b3"/>
+  <circle cx="372" cy="372" r="82" fill="#fff"/>
+  <circle cx="358" cy="322" r="15" fill="#075aa5"/>
+  <path d="M356 344l-10 61m10-45h42l22 35m-65-19a43 43 0 1 0 42 51" fill="none" stroke="#075aa5" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

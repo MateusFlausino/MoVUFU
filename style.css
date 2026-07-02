@@ -89,6 +89,14 @@ select:focus-visible,
   text-transform: uppercase;
 }
 
+.brand__eyebrow img {
+  width: 26px;
+  height: 26px;
+  margin-right: 7px;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
 .brand h1 {
   margin: 10px 0 0;
   font-size: 1.72rem;
@@ -551,18 +559,6 @@ input[type="text"] {
   width: 28px;
   border-top: 5px solid #0f766e;
   border-radius: 999px;
-}
-
-.osm-legend__graph {
-  width: 28px;
-  border-top: 3px solid #0f766e;
-  border-radius: 999px;
-  opacity: 0.65;
-}
-
-.dwg-graph-edge {
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .leaflet-basemap-toggle {
@@ -1218,10 +1214,6 @@ input[type="text"] {
   color: #475569;
   font-size: 0.68rem;
   font-weight: 750;
-}
-
-.osm-legend__graph {
-  width: 20px;
 }
 
 .osm-legend__wheelchair {

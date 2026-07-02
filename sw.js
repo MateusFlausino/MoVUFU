@@ -1,11 +1,11 @@
-const CACHE_NAME = "movufu-v17";
+const CACHE_NAME = "movufu-v19";
 const APP_SHELL = [
   "/",
   "/index.html",
   "/style.css",
   "/app.js",
   "/manifest.json",
-  "/data/dwg-map-raw.json",
+  "/assets/mov-ufu-icon.svg",
   "/data/osm-santa-monica-accessibility.geojson",
   "/assets/icon-192.png",
   "/assets/icon-512.png"
