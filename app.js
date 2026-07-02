@@ -32,6 +32,16 @@ const DEFAULT_BUILDING_HEIGHT_MIN = 1;
 const DEFAULT_BUILDING_HEIGHT_MAX = 120;
 const VOICE_LISTENING_TIMEOUT_MS = 15000;
 const VOICE_MAX_ALTERNATIVES = 5;
+const VOICE_GENETIC_DEFAULT_WEIGHTS = Object.freeze({
+  phrase: 4.8,
+  compact: 3.6,
+  token: 1.7,
+  edit: 2.4,
+  blockCode: 5.5
+});
+const VOICE_GENETIC_POPULATION_SIZE = 8;
+const VOICE_GENETIC_GENERATIONS = 5;
+const VOICE_GENETIC_STORAGE_PREFIX = "movufu-voice-ga:v1:";
 const PORTUGUESE_SPOKEN_LETTERS = {
   a: "a", be: "b", b: "b", ce: "c", c: "c", de: "d", d: "d", e: "e",
   efe: "f", f: "f", ge: "g", g: "g", aga: "h", h: "h", i: "i", jota: "j", j: "j",
@@ -77,8 +87,11 @@ const state = {
   selectedBuildingId: null,
   threeDMap: null,
   voiceHadResult: false,
+  voiceGeneticFitness: 0,
+  voiceGeneticWeights: { ...VOICE_GENETIC_DEFAULT_WEIGHTS },
   voiceLastError: null,
   voiceListening: false,
+  voiceMatchCache: new Map(),
   voiceSpeechDetected: false,
   voiceRecognition: null,
   voiceStopTimer: null,
@@ -441,9 +454,18 @@ function handleManualVoiceCommand(event) {
 
 function processVoiceCommand(transcript) {
   const command = normalizeVoiceText(transcript);
-  const originId = findNodeAfterVoiceKeyword(command, ["origem", "de", "do", "da", "dos", "das", "desde", "partida", "inicio", "saindo"]);
-  const destinationId = findNodeAfterVoiceKeyword(command, ["destino", "para", "ate", "chegada", "fim"]);
+  const hasRouteSeparator = command.split(" ").some((word) => ["para", "ate"].includes(word));
+  const routePair = findVoiceRoutePair(command);
+  const originId = routePair?.originId
+    || (!hasRouteSeparator && findNodeAfterVoiceKeyword(command, ["origem", "de", "do", "da", "dos", "das", "desde", "partida", "inicio", "saindo"]));
+  const destinationId = routePair?.destinationId
+    || (!hasRouteSeparator && findNodeAfterVoiceKeyword(command, ["destino", "para", "ate", "chegada", "fim"]));
   let changed = false;
+
+  if (hasRouteSeparator && !routePair) {
+    refs.voiceState.textContent = `Nao consegui confirmar os dois blocos em “${transcript}”. Fale, por exemplo: do bloco 1E para o bloco 3E.`;
+    return;
+  }
 
   if (originId) {
     refs.originSelect.value = originId;
@@ -482,6 +504,22 @@ function processVoiceCommand(transcript) {
   }
 }
 
+function findVoiceRoutePair(command) {
+  const words = normalizeVoiceText(command).split(" ").filter(Boolean);
+  const separatorIndex = words.findIndex((word) => ["para", "ate"].includes(word));
+
+  if (separatorIndex <= 0 || separatorIndex >= words.length - 1) {
+    return null;
+  }
+
+  const originText = words.slice(0, separatorIndex).join(" ");
+  const destinationText = words.slice(separatorIndex + 1).join(" ");
+  const originId = findNodeInVoiceText(originText);
+  const destinationId = findNodeInVoiceText(destinationText);
+
+  return originId && destinationId ? { originId, destinationId } : null;
+}
+
 function findNodeAfterVoiceKeyword(command, keywords) {
   const words = command.split(" ").filter(Boolean);
 
@@ -507,8 +545,10 @@ function findNodeAfterVoiceKeyword(command, keywords) {
 
 function findNodeInVoiceText(text) {
   const normalizedText = normalizeVoiceComparable(text);
-  const exactMatches = [];
-  const fuzzyMatches = [];
+  if (state.voiceMatchCache.has(normalizedText)) {
+    return state.voiceMatchCache.get(normalizedText);
+  }
+  const matches = [];
 
   state.nodes.forEach((node) => {
     let bestScore = 0;
@@ -519,37 +559,64 @@ function findNodeInVoiceText(text) {
       if (!normalizedAlias) {
         return;
       }
-
-      if (containsVoicePhrase(normalizedText, normalizedAlias)) {
-        bestScore = Math.max(bestScore, 100 + normalizedAlias.length);
-        return;
-      }
-
-      if (normalizedAlias.length >= 5) {
-        const distance = levenshteinDistance(normalizedText, normalizedAlias);
-        const similarity = 1 - (distance / Math.max(normalizedText.length, normalizedAlias.length));
-
-        if (similarity >= 0.78) {
-          bestScore = Math.max(bestScore, similarity * 100);
-        }
-      }
+      bestScore = Math.max(bestScore, scoreVoiceAlias(normalizedText, normalizedAlias, state.voiceGeneticWeights));
     });
 
-    if (bestScore >= 100) {
-      exactMatches.push({ id: node.id, score: bestScore });
-    } else if (bestScore > 0) {
-      fuzzyMatches.push({ id: node.id, score: bestScore });
+    if (bestScore > 0) {
+      matches.push({ id: node.id, score: bestScore });
     }
   });
 
-  const matches = exactMatches.length ? exactMatches : fuzzyMatches;
   matches.sort((left, right) => right.score - left.score || naturalCompare(left.id, right.id));
 
-  if (!matches.length || (matches[1] && matches[0].score === matches[1].score)) {
+  const minimumScore = 4.5;
+  const minimumMargin = 0.35;
+
+  if (!matches.length || matches[0].score < minimumScore || (matches[1] && matches[0].score - matches[1].score < minimumMargin)) {
+    state.voiceMatchCache.set(normalizedText, null);
     return null;
   }
 
+  state.voiceMatchCache.set(normalizedText, matches[0].id);
   return matches[0].id;
+}
+
+function scoreVoiceAlias(text, alias, weights = VOICE_GENETIC_DEFAULT_WEIGHTS) {
+  const features = getVoiceMatchFeatures(text, alias);
+  return scoreVoiceFeatures(features, weights);
+}
+
+function scoreVoiceFeatures(features, weights) {
+  return features.phrase * weights.phrase
+    + features.compact * weights.compact
+    + features.token * weights.token
+    + features.edit * weights.edit
+    + features.blockCode * weights.blockCode;
+}
+
+function getVoiceMatchFeatures(text, alias) {
+  const textCompact = text.replace(/\s+/g, "");
+  const aliasCompact = alias.replace(/\s+/g, "");
+  const textTokens = new Set(text.split(" ").filter(Boolean));
+  const aliasTokens = new Set(alias.split(" ").filter(Boolean));
+  const sharedTokens = [...aliasTokens].filter((token) => textTokens.has(token)).length;
+  const tokenUnion = new Set([...textTokens, ...aliasTokens]).size || 1;
+  const maxLength = Math.max(text.length, alias.length, 1);
+  const edit = 1 - (levenshteinDistance(text, alias) / maxLength);
+  const textCode = extractVoiceBlockCode(text);
+  const aliasCode = extractVoiceBlockCode(alias);
+
+  return {
+    phrase: containsVoicePhrase(text, alias) ? 1 : 0,
+    compact: aliasCompact.length >= 2 && textCompact.includes(aliasCompact) ? 1 : 0,
+    token: sharedTokens / tokenUnion,
+    edit: Math.max(0, edit),
+    blockCode: textCode && aliasCode && textCode === aliasCode ? 1 : 0
+  };
+}
+
+function extractVoiceBlockCode(value) {
+  return normalizeVoiceComparable(value).match(/\b(\d+[a-z](?:-[a-z]+)?)\b/i)?.[1]?.toLowerCase() || "";
 }
 
 function buildVoiceNodeAliases(node) {
@@ -618,6 +685,7 @@ function extractBlockAliases(value) {
 function normalizeVoiceComparable(value) {
   return normalizeVoiceText(value)
     .replace(/\b(\d+)\s+([a-z])\b/g, "$1$2")
+    .replace(/\b(\d+[a-z])\s+(lab|[ab])\b/g, "$1-$2")
     .replace(/\b([a-z])\s+(\d+)\b/g, "$1$2");
 }
 
@@ -691,6 +759,204 @@ function scoreVoiceTranscript(transcript) {
     .filter((keyword) => containsVoicePhrase(command, keyword)).length;
   const nodeScore = findNodeInVoiceText(command) ? 30 : 0;
   return nodeScore + keywordCount * 5;
+}
+
+function scheduleVoiceGeneticOptimization() {
+  const nodesSnapshot = [...state.nodes];
+  const modelKey = VOICE_GENETIC_STORAGE_PREFIX + nodesSnapshot.map(getVoiceNodeBlockCode).filter(Boolean).sort().join(",");
+  const storedModel = window.localStorage?.getItem(modelKey);
+  state.voiceMatchCache.clear();
+
+  if (storedModel) {
+    try {
+      const parsedModel = JSON.parse(storedModel);
+      if (parsedModel?.weights && Number.isFinite(parsedModel.fitness)) {
+        state.voiceGeneticWeights = parsedModel.weights;
+        state.voiceGeneticFitness = parsedModel.fitness;
+        return;
+      }
+    } catch (error) {
+      window.localStorage?.removeItem(modelKey);
+    }
+  }
+
+  const optimize = () => {
+    const result = optimizeVoiceMatchingWeights(nodesSnapshot);
+    state.voiceGeneticWeights = result.weights;
+    state.voiceGeneticFitness = result.fitness;
+    state.voiceMatchCache.clear();
+    window.localStorage?.setItem(modelKey, JSON.stringify(result));
+  };
+
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(optimize, { timeout: 1200 });
+  } else {
+    setTimeout(optimize, 0);
+  }
+}
+
+function optimizeVoiceMatchingWeights(nodes, options = {}) {
+  const trainingSamples = buildVoiceGeneticTrainingSamples(nodes);
+
+  if (trainingSamples.length < 2) {
+    return { weights: { ...VOICE_GENETIC_DEFAULT_WEIGHTS }, fitness: 1, generations: 0 };
+  }
+
+  const populationSize = options.populationSize || VOICE_GENETIC_POPULATION_SIZE;
+  const generations = options.generations || VOICE_GENETIC_GENERATIONS;
+  const random = createSeededVoiceRandom(options.seed || 31513);
+  let population = [Object.values(VOICE_GENETIC_DEFAULT_WEIGHTS)];
+
+  while (population.length < populationSize) {
+    population.push(Array.from({ length: 5 }, () => 0.4 + random() * 7.2));
+  }
+
+  for (let generation = 0; generation < generations; generation += 1) {
+    const ranked = population
+      .map((genes) => ({ genes, fitness: evaluateVoiceGenes(genes, trainingSamples) }))
+      .sort((left, right) => right.fitness - left.fitness);
+    const eliteCount = Math.max(2, Math.floor(populationSize * 0.25));
+    const elites = ranked.slice(0, eliteCount).map((candidate) => candidate.genes);
+    const nextPopulation = elites.map((genes) => [...genes]);
+
+    while (nextPopulation.length < populationSize) {
+      const parentA = elites[Math.floor(random() * elites.length)];
+      const parentB = elites[Math.floor(random() * elites.length)];
+      const child = parentA.map((gene, index) => {
+        const inherited = random() < 0.5 ? gene : parentB[index];
+        const mutation = random() < 0.28 ? (random() - 0.5) * 1.4 : 0;
+        return Math.min(9, Math.max(0.2, inherited + mutation));
+      });
+      nextPopulation.push(child);
+    }
+
+    population = nextPopulation;
+  }
+
+  const winner = population
+    .map((genes) => ({ genes, fitness: evaluateVoiceGenes(genes, trainingSamples) }))
+    .sort((left, right) => right.fitness - left.fitness)[0];
+
+  return {
+    weights: voiceGenesToWeights(winner.genes),
+    fitness: winner.fitness,
+    generations
+  };
+}
+
+function buildVoiceGeneticTrainingSamples(nodes) {
+  const uniqueNodes = [];
+  const seenCodes = new Set();
+
+  nodes.forEach((node) => {
+    const code = getVoiceNodeBlockCode(node);
+    if (code && !seenCodes.has(code)) {
+      seenCodes.add(code);
+      uniqueNodes.push({ node, code });
+    }
+  });
+
+  const candidates = uniqueNodes.map(({ node, code }) => ({
+    id: node.id,
+    aliases: [...new Set(buildSpokenBlockVariants(code).slice(0, 3).map(normalizeVoiceComparable).filter(Boolean))]
+  }));
+  const samples = [];
+
+  uniqueNodes.forEach(({ node, code }) => {
+    buildSpokenBlockVariants(code).slice(0, 3).forEach((phrase) => {
+      const text = normalizeVoiceComparable(phrase);
+      samples.push({
+        expectedId: node.id,
+        text,
+        candidates: candidates.map((candidate) => ({
+          id: candidate.id,
+          features: candidate.aliases.map((alias) => getVoiceMatchFeatures(text, alias))
+        }))
+      });
+    });
+  });
+
+  return samples;
+}
+
+function getVoiceNodeBlockCode(node) {
+  const values = [
+    getNodeAttribute(node, "bloco", "block", "building", "predio", "prédio"),
+    node?.name,
+    node?.blockName
+  ];
+
+  for (const value of values) {
+    const normalized = normalizeVoiceComparable(value);
+    const match = normalized.match(/\b(\d+[a-z](?:-[a-z]+)?)\b/i);
+    if (match) {
+      return match[1].toUpperCase();
+    }
+  }
+
+  return "";
+}
+
+function buildSpokenBlockVariants(code) {
+  const match = String(code).match(/^(\d+)([A-Z])(?:-([A-Z]+))?$/i);
+
+  if (!match) {
+    return [code];
+  }
+
+  const [, number, firstLetter, secondLetter] = match;
+  const firstSpoken = PORTUGUESE_LETTER_NAMES[firstLetter.toLowerCase()] || firstLetter;
+  const suffix = secondLetter
+    ? ` ${secondLetter.toLowerCase().split("").map((letter) => PORTUGUESE_LETTER_NAMES[letter] || letter).join(" ")}`
+    : "";
+  const spokenCode = `${number} ${firstSpoken}${suffix}`;
+
+  return [
+    code,
+    spokenCode,
+    `bloco ${spokenCode}`,
+    `do bloco ${spokenCode}`,
+    `predio ${spokenCode}`
+  ];
+}
+
+function evaluateVoiceGenes(genes, samples) {
+  const weights = voiceGenesToWeights(genes);
+  let correct = 0;
+  let marginReward = 0;
+
+  samples.forEach((sample) => {
+    const ranked = sample.candidates.map((candidate) => ({
+      id: candidate.id,
+      score: candidate.features.reduce((best, features) => Math.max(best, scoreVoiceFeatures(features, weights)), 0)
+    })).sort((left, right) => right.score - left.score);
+    const margin = ranked[0].score - (ranked[1]?.score || 0);
+
+    if (ranked[0].id === sample.expectedId && margin > 0.1) {
+      correct += 1;
+      marginReward += Math.min(margin, 3) / 3;
+    }
+  });
+
+  return (correct + marginReward * 0.05) / samples.length;
+}
+
+function voiceGenesToWeights(genes) {
+  return {
+    phrase: genes[0],
+    compact: genes[1],
+    token: genes[2],
+    edit: genes[3],
+    blockCode: genes[4]
+  };
+}
+
+function createSeededVoiceRandom(seed) {
+  let value = seed >>> 0;
+  return () => {
+    value = (value * 1664525 + 1013904223) >>> 0;
+    return value / 4294967296;
+  };
 }
 
 function updateVoiceRecognitionGrammar() {
@@ -1277,6 +1543,7 @@ function loadOsmRoutingGraph(geoJson) {
   );
   populateOsmControls();
   updateVoiceRecognitionGrammar();
+  scheduleVoiceGeneticOptimization();
 }
 
 function findNearestOsmEntrance(coordinate, entranceCoordinates, maximumDistance = 90) {
@@ -1819,6 +2086,7 @@ function loadGraph(rawData) {
   state.selectedBuildingId = getBuildingCandidates()[0]?.item.id || null;
 
   updateVoiceRecognitionGrammar();
+  scheduleVoiceGeneticOptimization();
 
   refs.nodeCount.textContent = String(nodes.length);
   refs.edgeCount.textContent = String(segments.length);
