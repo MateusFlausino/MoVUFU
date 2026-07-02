@@ -75,6 +75,7 @@ def is_accessibility_node(node_tags: dict[str, str]) -> bool:
         node_tags.get("highway") == "crossing"
         or node_tags.get("kerb") in ACCESSIBLE_KERBS
         or "wheelchair" in node_tags
+        or node_tags.get("ramp") == "yes"
         or "tactile_paving" in node_tags
     )
 

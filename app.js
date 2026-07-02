@@ -836,6 +836,7 @@ function initializeOsmMap() {
       '<div class="osm-legend__content" hidden>',
       '<span class="osm-legend__item"><i class="osm-legend__line"></i>Caminho de pedestres</span>',
       '<span class="osm-legend__item"><i class="osm-legend__point"></i>Travessia / rampa candidata</span>',
+      '<span class="osm-legend__item"><i class="osm-legend__wheelchair">♿</i>Rampa / guia acessivel</span>',
       '<span class="osm-legend__item"><i class="osm-legend__building"></i>Delimitacao dos blocos</span>',
       '<small class="osm-legend__warning">Confirmar rampas em campo antes de indicar rota acessivel.</small>',
       "</div>"
@@ -881,7 +882,20 @@ async function loadOsmAccessibilityLayer() {
         };
       },
       pointToLayer(feature, latlng) {
-        const isDestination = feature?.properties?.feature_class === "destination";
+        const properties = feature?.properties || {};
+        const isDestination = properties.feature_class === "destination";
+        if (isOsmWheelchairRamp(properties)) {
+          return L.marker(latlng, {
+            icon: L.divIcon({
+              className: "osm-accessibility-div-icon",
+              html: '<span class="osm-accessibility-icon" aria-hidden="true">♿</span>',
+              iconAnchor: [16, 16],
+              iconSize: [32, 32]
+            }),
+            keyboard: true,
+            title: "Rampa ou guia acessivel"
+          });
+        }
         return L.circleMarker(latlng, {
           radius: isDestination ? 4.5 : 5.5,
           fillColor: isDestination ? "#2563eb" : "#f97316",
@@ -903,6 +917,13 @@ async function loadOsmAccessibilityLayer() {
             direction: "top",
             opacity: 0.9
           });
+        } else if (isOsmWheelchairRamp(properties)) {
+          featureLayer.bindPopup([
+            "<strong>Rampa / guia acessivel</strong>",
+            properties.kerb ? `<br>Guia: ${properties.kerb}` : "",
+            properties.wheelchair ? `<br>Cadeira de rodas: ${properties.wheelchair}` : "",
+            properties.tactile_paving ? `<br>Piso tatil: ${properties.tactile_paving}` : ""
+          ].join(""));
         } else if (feature?.geometry?.type === "Point") {
           featureLayer.bindPopup([
             "<strong>Travessia mapeada</strong>",
@@ -956,6 +977,7 @@ async function fetchLiveOsmGeoJson() {
     node["highway"="crossing"](${bbox});
     node["kerb"~"^(lowered|flush)$"](${bbox});
     node["wheelchair"](${bbox});
+    node["ramp"](${bbox});
     node["tactile_paving"](${bbox});
     node["entrance"](${bbox});
     way["building"](${bbox});
@@ -1115,6 +1137,14 @@ function isOsmRoutableWay(properties = {}) {
     return false;
   }
   return true;
+}
+
+function isOsmWheelchairRamp(properties = {}) {
+  return properties.feature_class === "accessibility_point" && (
+    /^(lowered|flush)$/.test(properties.kerb || "")
+    || /^(yes|designated)$/.test(properties.wheelchair || "")
+    || properties.ramp === "yes"
+  );
 }
 
 function loadOsmRoutingGraph(geoJson) {
