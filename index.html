@@ -17,7 +17,7 @@
 <body>
   <main class="app-shell">
     <section class="control-panel" aria-label="Navegacao acessivel">
-      <button type="button" id="toggleNavBtn" class="toggle-nav-btn" aria-expanded="true" aria-controls="navigatorCard">Ocultar</button>
+      <button type="button" id="toggleNavBtn" class="toggle-nav-btn" aria-expanded="true" aria-controls="navigatorCard" hidden>Ocultar</button>
       <button type="button" id="installAppBtn" class="install-app-btn" hidden>Instalar app</button>
 
       <header class="brand">
@@ -28,7 +28,7 @@
       <div class="navigator-card" id="navigatorCard">
         <div class="navigator-card__header">
           <h2>Navegação</h2>
-          <button type="button" id="voicePanelToggleBtn" class="icon-button" aria-expanded="false" aria-controls="voicePanel" title="Busca por voz">
+          <button type="button" id="voicePanelToggleBtn" class="icon-button" aria-label="Iniciar busca por voz" title="Falar origem e destino">
             <i data-lucide="mic" aria-hidden="true"></i>
             <span class="sr-only">Busca por voz</span>
           </button>
@@ -149,7 +149,7 @@
       <div class="view-switch" role="group" aria-label="Tipo de mapa">
         <button type="button" id="svgViewBtn" hidden>Planta UFU</button>
         <button type="button" id="osmViewBtn" class="is-active">OpenStreetMap</button>
-        <button type="button" id="mapboxViewBtn">Mapbox 3D</button>
+        <button type="button" id="mapboxViewBtn" hidden>Mapbox 3D</button>
       </div>
 
       <div class="map-toolbar is-hidden">

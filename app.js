@@ -247,7 +247,7 @@ function bindEvents() {
   refs.mapboxViewBtn.addEventListener("click", activateMapboxView);
   refs.osmViewBtn.addEventListener("click", () => setViewMode("osm"));
   refs.voiceBtn.addEventListener("click", toggleVoiceRecognition);
-  refs.voicePanelToggleBtn.addEventListener("click", toggleVoicePanel);
+  refs.voicePanelToggleBtn.addEventListener("click", toggleVoiceRecognition);
   refs.clearRouteBtn.addEventListener("click", () => {
     if (state.routingMode === "osm") {
       clearOsmRoute("Escolha uma nova origem e destino.");
@@ -272,16 +272,6 @@ function bindEvents() {
   prepareInstallHint();
 }
 
-function toggleVoicePanel() {
-  const willOpen = refs.voicePanel.hidden;
-  refs.voicePanel.hidden = !willOpen;
-  refs.voicePanelToggleBtn.setAttribute("aria-expanded", String(willOpen));
-  refs.voicePanelToggleBtn.classList.toggle("is-active", willOpen);
-  if (willOpen) {
-    refs.voiceCommandInput.focus();
-  }
-}
-
 function initializeVoiceRecognition() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -304,6 +294,8 @@ function initializeVoiceRecognition() {
     state.voiceSpeechDetected = false;
     refs.voiceBtn.textContent = "●";
     refs.voiceBtn.classList.add("is-listening");
+    refs.voicePanelToggleBtn.classList.add("is-active");
+    setStatus("Microfone ativo. Diga a origem e o destino.", "info");
     refs.voicePanel.classList.add("is-listening");
     refs.voiceState.textContent = "Ouvindo...";
     clearTimeout(state.voiceStopTimer);
@@ -333,6 +325,7 @@ function initializeVoiceRecognition() {
     state.voiceStopTimer = null;
     refs.voiceBtn.textContent = "🎙";
     refs.voiceBtn.classList.remove("is-listening");
+    refs.voicePanelToggleBtn.classList.remove("is-active");
     refs.voicePanel.classList.remove("is-listening");
 
     if (!state.voiceLastError && !state.voiceHadResult && !state.voiceSpeechDetected) {
@@ -343,6 +336,7 @@ function initializeVoiceRecognition() {
   recognition.addEventListener("error", (event) => {
     state.voiceLastError = event.error || "unknown";
     refs.voiceState.textContent = getVoiceErrorMessage(event.error);
+    setStatus(getVoiceErrorMessage(event.error), "error");
   });
 
   recognition.addEventListener("result", (event) => {
@@ -720,11 +714,11 @@ function initializeMapboxMap() {
   }
 
   if (!MAPBOX_ACCESS_TOKEN) {
-    refs.mapboxViewBtn.disabled = false;
-    refs.mapboxViewBtn.title = "Clique para informar o token publico do Mapbox.";
+    refs.mapboxViewBtn.hidden = true;
     return false;
   }
 
+  refs.mapboxViewBtn.hidden = false;
   refs.mapboxViewBtn.disabled = false;
   refs.mapboxViewBtn.title = "Abrir visualizacao Mapbox 3D";
   mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
@@ -759,13 +753,8 @@ function initializeMapboxMap() {
 
 function activateMapboxView() {
   if (!MAPBOX_ACCESS_TOKEN) {
-    const token = window.prompt("Cole seu token publico do Mapbox (iniciado por pk.):", "");
-    if (!token) {
-      setStatus("O Mapbox precisa de um token publico para abrir o mapa 3D.", "info");
-      return;
-    }
-    MAPBOX_ACCESS_TOKEN = token.trim();
-    window.localStorage?.setItem("movufu-mapbox-token", MAPBOX_ACCESS_TOKEN);
+    setStatus("Mapbox 3D indisponivel sem token configurado.", "info");
+    return;
   }
 
   if (initializeMapboxMap()) {
@@ -821,13 +810,35 @@ function initializeOsmMap() {
   );
   const savedBaseLayer = window.localStorage?.getItem("movufu-osm-base-layer");
   (savedBaseLayer === "esri" ? esriImageryLayer : osmBaseLayer).addTo(map);
-  L.control.layers({
-    "OpenStreetMap (padrao)": osmBaseLayer,
-    "Imagens globais da Esri": esriImageryLayer
-  }, null, {
-    collapsed: true,
-    position: "topright"
-  }).addTo(map);
+  const basemapControl = L.control({ position: "topright" });
+  basemapControl.onAdd = () => {
+    const button = L.DomUtil.create("button", "leaflet-basemap-toggle");
+    button.type = "button";
+    button.title = savedBaseLayer === "esri" ? "Usar mapa padrao" : "Usar imagem de satelite";
+    button.setAttribute("aria-label", button.title);
+    button.innerHTML = '<span aria-hidden="true">◇</span>';
+    L.DomEvent.disableClickPropagation(button);
+    L.DomEvent.on(button, "click", () => {
+      const usingEsri = map.hasLayer(esriImageryLayer);
+      if (usingEsri) {
+        map.removeLayer(esriImageryLayer);
+        osmBaseLayer.addTo(map);
+      } else {
+        map.removeLayer(osmBaseLayer);
+        esriImageryLayer.addTo(map);
+      }
+      const nextLayerId = usingEsri ? "osm" : "esri";
+      window.localStorage?.setItem("movufu-osm-base-layer", nextLayerId);
+      setStatus(
+        nextLayerId === "esri" ? "Imagem de satelite ativada." : "Mapa padrao ativado.",
+        "info"
+      );
+      button.title = usingEsri ? "Usar imagem de satelite" : "Usar mapa padrao";
+      button.setAttribute("aria-label", button.title);
+    });
+    return button;
+  };
+  basemapControl.addTo(map);
   map.on("baselayerchange", (event) => {
     const layerId = event.layer === esriImageryLayer ? "esri" : "osm";
     window.localStorage?.setItem("movufu-osm-base-layer", layerId);
@@ -844,25 +855,10 @@ function initializeOsmMap() {
   legend.onAdd = () => {
     const container = L.DomUtil.create("div", "osm-legend");
     container.innerHTML = [
-      '<button type="button" class="osm-legend__toggle" aria-expanded="false">Legenda <span aria-hidden="true">＋</span></button>',
-      '<div class="osm-legend__content" hidden>',
-      '<span class="osm-legend__item"><i class="osm-legend__line"></i>Caminho de pedestres</span>',
-      '<span class="osm-legend__item"><i class="osm-legend__graph"></i>Grafo cadastrado</span>',
-      '<span class="osm-legend__item"><i class="osm-legend__point"></i>Travessia / rampa candidata</span>',
-      '<span class="osm-legend__item"><i class="osm-legend__wheelchair">♿</i>Rampa / guia acessivel</span>',
-      '<span class="osm-legend__item"><i class="osm-legend__building"></i>Delimitacao dos blocos</span>',
-      '<small class="osm-legend__warning">Confirmar rampas em campo antes de indicar rota acessivel.</small>',
-      "</div>"
+      '<span class="osm-legend__item" title="Grafo cadastrado"><i class="osm-legend__graph"></i>Rotas</span>',
+      '<span class="osm-legend__item" title="Rampa ou guia acessivel"><i class="osm-legend__wheelchair">♿</i>Acessibilidade</span>'
     ].join("");
-    const toggle = container.querySelector(".osm-legend__toggle");
-    const content = container.querySelector(".osm-legend__content");
     L.DomEvent.disableClickPropagation(container);
-    toggle.addEventListener("click", () => {
-      const expanded = toggle.getAttribute("aria-expanded") === "true";
-      toggle.setAttribute("aria-expanded", String(!expanded));
-      toggle.querySelector("span").textContent = expanded ? "＋" : "−";
-      content.hidden = expanded;
-    });
     return container;
   };
   legend.addTo(map);
